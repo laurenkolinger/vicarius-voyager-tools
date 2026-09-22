@@ -1,0 +1,169 @@
+/* VICARIUS registry window state-role chips, grid cells and row tints.
+
+   What this is: a small page-shared stylesheet, linked by any registry-
+   style window (a grid view, a table view, or both) that needs the eight
+   state roles defined in docs/superpowers/specs/2026-09-02-matrix-window-
+   design.md section 2 (empty, planned, in progress, needs attention,
+   failed, done by machine, done by person, verified). It is NOT part of
+   the shared design block (vicarius_workflow.css, vicarius_tooltips.js):
+   a page can add this file on top of that block, and editing this file
+   never bumps the workflow-page-design spec's version line.
+
+   Changes to role colours themselves go through the registry window
+   design spec (section 2), not through this file: that document is the
+   one place the eight-role vocabulary and its colours are decided, so
+   every registry window keeps the same meaning for the same colour. Do
+   not add a ninth role or a new hue here; propose it in the spec first.
+
+   Why every rule below names both ".chip" (or ".cell") and a ".role-*"
+   class instead of giving ".chip"/".cell" a shape of their own: the
+   desktop already has two unrelated global ".chip" classes (a nav badge
+   in theme.css and a priority tag in home.css). A bare ".chip" rule here
+   would fight both of them depending on load order, so every role rule
+   is written as a complete, self-contained compound selector that sets
+   its own size, border and fill; it never relies on a shared base rule.
+
+   Token usage: --border, --magenta, --warning and --error are the shared
+   design tokens (docs/superpowers/specs/2026-09-02-workflow-page-design.md
+   section 2), read with their token hex as the fallback so this file still
+   renders correctly on a page that has not linked vicarius_workflow.css.
+   The three "done by ..." fills (machine, person, verified) are semantic
+   data colours, not accent tokens (workflow spec section 2 keeps them
+   separate from --magenta and friends), so they are written as their own
+   literal hex, matching the reference Coverage Matrix page.
+
+   Contrast: every filled role (needs attention, failed, done by machine,
+   done by person, verified) sets its own text colour to --bg (near-black)
+   rather than inheriting the page's light --text ink. Measured against
+   each fill, --bg text clears 4.5:1 in every case (needs attention 11.4:1,
+   done by machine 6.9:1, done by person 8.5:1, failed 6.1:1, verified
+   4.9:1); light --text ink fails badly on all five (2.0 to 2.8:1), so one
+   rule (dark ink on every fill) is what actually holds the floor, and it
+   is the only choice that also keeps the three visually lightest fills
+   (needs attention, done by machine, done by person) readable. */
+
+/* -- Chips: 12 px swatches, the legend and inline-label size ---------- */
+.chip.role-empty,
+.chip.role-planned,
+.chip.role-in-progress,
+.chip.role-attention,
+.chip.role-failed,
+.chip.role-machine,
+.chip.role-person,
+.chip.role-verified {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  margin: 0;
+  border-radius: var(--radius, 2px);
+  vertical-align: middle;
+  flex: none;
+}
+
+/* -- Grid cells: 18 px squares, the coverage-grid cell size ----------- */
+.cell.role-empty,
+.cell.role-planned,
+.cell.role-in-progress,
+.cell.role-attention,
+.cell.role-failed,
+.cell.role-machine,
+.cell.role-person,
+.cell.role-verified {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  border-radius: var(--radius, 2px);
+  vertical-align: middle;
+  flex: none;
+}
+
+/* -- Role treatments (spec section 2), shared by chips and cells ------ */
+
+/* empty: nothing recorded, nobody has looked. Sorts first. */
+.chip.role-empty, .cell.role-empty {
+  background: transparent;
+  border: 1px solid var(--border, #2a2a38);
+}
+
+/* planned: a person intends it; nothing has run. */
+.chip.role-planned, .cell.role-planned {
+  background: transparent;
+  border: 2px dotted var(--border, #2a2a38);
+}
+
+/* in progress: a process or a review is under way. */
+.chip.role-in-progress, .cell.role-in-progress {
+  background: transparent;
+  border: 2px solid var(--magenta, #E20074);
+}
+
+/* needs attention: waiting on a person (flagged, interrupted, stale). */
+.chip.role-attention, .cell.role-attention {
+  background: var(--warning, #FFB800);
+  border: 1px solid var(--warning, #FFB800);
+  color: var(--bg, #0a0a0f);
+}
+
+/* failed: a process ended badly and needs a decision. */
+.chip.role-failed, .cell.role-failed {
+  background: var(--error, #FF4D6D);
+  border: 1px solid var(--error, #FF4D6D);
+  color: var(--bg, #0a0a0f);
+}
+
+/* done by machine: a process or model finished; not yet confirmed. */
+.chip.role-machine, .cell.role-machine {
+  background: #3aa0e0;
+  border: 1px solid #3aa0e0;
+  color: var(--bg, #0a0a0f);
+}
+
+/* done by person: a person made or confirmed the record. */
+.chip.role-person, .cell.role-person {
+  background: #4bbf73;
+  border: 1px solid #4bbf73;
+  color: var(--bg, #0a0a0f);
+}
+
+/* verified: an authority confirmed it; wins over every other state. */
+.chip.role-verified, .cell.role-verified {
+  background: #B159CF;
+  border: 1px solid #B159CF;
+  color: var(--bg, #0a0a0f);
+}
+
+/* -- Row tints: a table row carries the role class, not just its state
+      chip, and every cell in that row gets an 8 percent wash of the same
+      colour so the row reads as a whole without drowning its text. ---- */
+tr.role-empty td { background: rgba(42, 42, 56, 0.08); }
+tr.role-planned td { background: rgba(42, 42, 56, 0.08); }
+tr.role-in-progress td { background: rgba(226, 0, 116, 0.08); }
+tr.role-attention td { background: rgba(255, 184, 0, 0.08); }
+tr.role-failed td { background: rgba(255, 77, 109, 0.08); }
+tr.role-machine td { background: rgba(58, 160, 224, 0.08); }
+tr.role-person td { background: rgba(75, 191, 115, 0.08); }
+tr.role-verified td { background: rgba(177, 89, 207, 0.08); }
+
+/* -- Legend: chip then state word, inline, 28 px tall items ----------- */
+.role-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 20px;
+}
+.role-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  font-family: var(--font-body, 'Inter', ui-sans-serif, sans-serif);
+  font-size: 12px;
+  color: var(--text, #F5EDF0);
+}

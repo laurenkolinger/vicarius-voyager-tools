@@ -1,0 +1,61 @@
+# ==============================================================================
+# MODULE INTERFACE DEFINITION: voyager_tools
+# ==============================================================================
+# Voyager tools: the admin-only tools page of the Voyager program (atlas
+# processing order, clean workbench, clean manual edit run, rewind, spot redo,
+# the prompts doc, parameter defaults, camera model), served as a native
+# blueprint inside the desktop host. This contract is seeded by plan task A7
+# with the parameter store library; task B6' adds the `ui` block (style
+# voyager_tools) when the page ships. Spec: section 7 of
+# /mnt/rip/vicarius_drive/docs/superpowers/specs/2026-09-03-voyager-program-design.md
+# ==============================================================================
+
+name: "voyager_tools"
+display_name: "Voyager tools"
+tags: ["3D", "TCRMP"]
+hidden: false
+hidden_reason: ""
+version: "0.2.0"
+description: "Admin-only tools for the Voyager program: edit the atlas processing order, clean the Workbench and a manual edit run, rewind or redo a row, keep the parameter defaults in voyagerparams, and record the camera model per season."
+author: "Lauren Olinger"
+created: "2026-09-04"
+
+# A tool page, not a processing stage: it produces no datasets and mints no runs.
+type: "tool"
+
+# Every route of this module answers 401 outside admin mode; the desktop shows
+# its item only in admin mode.
+admin_only: true
+
+# Native blueprint inside the desktop host (vicarius_ui_os/voyager_tools_views.py
+# mounts voyagertools/views.py at /voyager-tools). style routes the module tile
+# to that page; admin_only keeps the tile hidden and every route at 401 outside
+# admin mode. No launch block: nothing runs on its own port (standalone_app.py
+# on 5098 is a smoke-test host the platform never starts).
+ui:
+  style: "voyager_tools"
+  admin_only: true
+  page: "/voyager-tools"
+  fragment: "/voyager-tools/fragment"
+
+inputs: []
+outputs: []
+
+runtime:
+  python_version: ">=3.10"
+  gpu_required: false
+  dependencies: "requirements.txt"
+  estimated_time: "interactive"
+
+notes: |
+  voyagertools/views.py is the blueprint (page, fragment, JSON API of the
+  eight tools); order_tool.py, clean_workbench.py, clean_manual_edit.py,
+  rewind.py and camera_tool.py hold the tool logic; scripts/rewind_chunk.py
+  runs under metashape -r to drop a chunk (with --fake for tests).
+  voyagertools/paramsstore.py is the only reader and writer of the
+  voyagerparams checkout (vicarius/modules/voyagerparams/github_repo/): it
+  lists, loads, diffs and saves parameter versions, branches and custom run
+  sets, applies the versioning rule of spec section 7.7, and commits and
+  pushes through an injectable git runner. voyagertools/params_schema_voyager1.yaml
+  is the editor schema: every Voyager 1 key with label, tooltip, type, default
+  and validation. Tests: /usr/bin/python3 -m unittest discover -s tests -v.

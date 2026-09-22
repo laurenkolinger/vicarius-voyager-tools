@@ -1,0 +1,2 @@
+# voyager_tools dependencies (pinned per Commandment IX)
+pyyaml>=6.0

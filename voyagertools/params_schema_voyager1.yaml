@@ -1,0 +1,402 @@
+# Voyager 1 parameter schema: every key of the Voyager 1 template
+# (voyagerparams voyager1/versions/v1.0.0.yaml, which is the file
+# vicarius/modules/3D_phase_1/github_repo/analysis_params.yaml as shipped by
+# module 3D_phase_1 v1.1.0) with the label, tooltip and validation the full
+# editor renders. Definitions come from that module's README, section
+# "Parameters" (lines 104 to 386). Types: integer, number, boolean, string,
+# list. min and max are inclusive unless min_exclusive or max_exclusive is
+# true. hidden keys are kept in the file and never shown in the editor.
+# Read by voyagertools/paramsstore.py (validate_values) and by the editors of
+# the Voyager 1 setup page and Voyager tools.
+
+phase: voyager1
+template_version: v1.0.0
+schema_version: 1.0.0
+
+sections:
+  - id: project
+    label: Project
+    tooltip: Voyager 1 records the run name and free-text notes in the processing folder's analysis_params.yaml; neither changes how a reconstruction is built.
+  - id: run
+    label: Frame extraction and run
+    tooltip: These keys decide which timepoints Voyager 1 works on, how many still frames FFmpeg pulls out of each transect video, and the disk and GPU guards around each build.
+  - id: alignment
+    label: Alignment
+    tooltip: Alignment is the Metashape stage that finds matching feature points across frames and solves the camera positions; the tie point filters then remove weak points in bounded passes, which Voyager 1 calls the capped selection.
+  - id: reconstruction
+    label: Reconstruction
+    tooltip: Reconstruction turns the aligned cameras into depth maps, a full mesh, a DEM (a raster of elevation per pixel kept inside the psx) and the decimated delivery mesh that gets textured.
+  - id: scale_texture
+    label: Scale and texture
+    tooltip: Scale applies the two 0.75 m coded-target bars so the model is in metres and decides PASS or MANUAL_NEEDED; texture paints the frames onto the delivery mesh in 8192 pixel pages.
+
+keys:
+  - path: project.name
+    section: project
+    type: string
+    default: "base run"
+    label: Run name
+    tooltip: Voyager 1 overwrites this value with the run's folder name at launch, so editing it changes nothing.
+
+  - path: project.notes
+    section: project
+    type: string
+    default: ""
+    label: Notes
+    tooltip: Type free-text notes for this run. Voyager 1 copies them into the processing folder's analysis_params.yaml as PROJECT_NOTES and never reads them again.
+
+  - path: processing.tcrmp
+    section: run
+    type: boolean
+    default: true
+    label: TCRMP registry mode
+    tooltip: Tick this to select timepoints from the TCRMP 3D registry and write results back to it; untick to process a plain input folder by file name with no registry writes. Default on; the Voyager 1 setup page sets it from the run type.
+
+  - path: processing.frames_per_transect
+    section: run
+    type: integer
+    default: 1000
+    min: 0
+    label: Frames per transect
+    tooltip: Set how many still frames FFmpeg extracts, evenly spaced, from each transect video; the default 1000 gives about 1 cm of forward travel per frame. 100 runs a quick smoke test, and 0 marks the transect complete with no frames.
+
+  - path: processing.max_chunks_per_psx
+    section: run
+    type: integer
+    default: 4
+    min: 1
+    hidden: true
+    label: Chunks per psx
+    tooltip: Voyager 1 appends this many timepoint chunks to one Metashape project before starting a new range-named psx; the default 4 keeps a project near 40 GB. The project structure sets this value and the editor does not show it.
+
+  - path: processing.use_gpu
+    section: run
+    type: boolean
+    default: true
+    label: Use GPU
+    tooltip: Tick this to let Metashape run matching, depth maps and mesh building on every detected GPU; untick only to isolate a suspected driver fault. Default on; a CPU-only run on 8K frames has not been timed.
+
+  - path: processing.min_free_disk_gb
+    section: run
+    type: integer
+    default: 200
+    min: 0
+    unit: GB
+    label: Minimum free disk (GB)
+    tooltip: Set the free space, in GB, that the drive holding the processing folder must have before Voyager 1 starts a frame extraction or a Metashape build; under it the timepoint is marked failed and the run continues. Default 200; 0 turns the check off.
+
+  - path: processing.metashape.defaults.downscale
+    section: alignment
+    type: integer
+    default: 1
+    choices: [0, 1, 2, 4, 8]
+    label: Matching accuracy (downscale)
+    tooltip: Choose the image scale Metashape uses to detect and match features, where 0 upscales by 4 (Highest), 1 works on the full 8K frame (High), 2 halves each side (Medium), then 4 (Low) and 8 (Lowest). Default 1 keeps the sub-millimetre localisation the scale bars depend on.
+
+  - path: processing.metashape.defaults.keypoint_limit
+    section: alignment
+    type: integer
+    default: 40000
+    min: 0
+    label: Key point limit
+    tooltip: Set the most feature points Metashape detects per frame before matching; 0 removes the limit at the cost of many weak points. Default 40000 fills comfortably on an 8K reef frame.
+
+  - path: processing.metashape.defaults.tiepoint_limit
+    section: alignment
+    type: integer
+    default: 0
+    min: 0
+    label: Tie point limit
+    tooltip: Set the most matched points Metashape keeps per frame after matching; 0 keeps every match. Default 0, because the dense overlap of transect video is what lets the later filters separate good points from bad.
+
+  - path: processing.metashape.defaults.generic_preselection
+    section: alignment
+    type: boolean
+    default: false
+    label: Generic preselection
+    tooltip: Tick this to let Metashape guess the overlapping pairs with a low-accuracy pre-pass before matching; untick to test every pair. Default off, since the pre-pass can miss real overlaps on soft underwater frames and 1000 frames is small enough to pair exhaustively.
+
+  - path: processing.metashape.defaults.reference_preselection
+    section: alignment
+    type: boolean
+    default: false
+    label: Reference preselection
+    tooltip: Tick this to let Metashape choose image pairs from camera positions, a previous alignment or the frame sequence; untick to test every pair. Default off, because the frames carry no positions and sequential pairing misses the loop closures a diver produces.
+
+  - path: processing.metashape.defaults.filter_stationary_points
+    section: alignment
+    type: boolean
+    default: true
+    label: Filter stationary points
+    tooltip: Tick this to drop tie points that sit at the same pixel across many frames, such as a port scratch, a droplet or a sensor blemish. Default on; it is part of the stricter alignment set that brought scale error from 4.10 mm to 1.34 mm.
+
+  - path: processing.metashape.defaults.adaptive_fitting
+    section: alignment
+    type: boolean
+    default: false
+    label: Adaptive camera fitting
+    tooltip: Tick this to let Metashape choose which lens parameters to solve on each pass; untick to solve the same fixed set every time. Default off, so every bundle adjustment is reproducible on the weak nadir geometry of a flat reef.
+
+  - path: processing.metashape.defaults.fit_k4
+    section: alignment
+    type: boolean
+    default: false
+    label: Fit K4
+    tooltip: Tick this to let the legacy selection path also solve the fourth radial distortion term K4. Default off, because K4 is poorly constrained on near-flat nadir geometry and trades against K3; the capped path always leaves it off.
+
+  - path: processing.metashape.defaults.reconstruction_uncertainty
+    section: alignment
+    type: number
+    default: 15
+    min: 1
+    label: Reconstruction uncertainty
+    tooltip: Set the starting threshold for the reconstruction uncertainty filter, the ratio of the longest to the shortest axis of a tie point's error ellipse; points over it are removed, never more than half the cloud in one pass. Default 15; the value has no unit and cannot go under 1.
+
+  - path: processing.metashape.defaults.projection_accuracy
+    section: alignment
+    type: number
+    default: 5
+    min: 0
+    min_exclusive: true
+    label: Projection accuracy
+    tooltip: Set the starting threshold for the projection accuracy filter, which removes points whose projections were measured at a coarse image scale; never more than half the cloud goes in one pass. Default 5; the value is a positive scale factor.
+
+  - path: processing.metashape.defaults.reprojection_error
+    section: alignment
+    type: number
+    default: 0.5
+    min: 0
+    min_exclusive: true
+    unit: px
+    label: Reprojection error
+    tooltip: Set the starting threshold, in normalised pixels, for the reprojection error filter, the distance between where a point projects and where it was detected; never more than a tenth of the cloud goes in one pass. Default 0.5; the cap widens it to about 0.8 to 1.0 on 8K frames.
+
+  - path: processing.metashape.defaults.depth_downscale
+    section: reconstruction
+    type: integer
+    default: 1
+    choices: [1, 2, 4, 8, 16]
+    label: Depth map quality (downscale)
+    tooltip: Choose the image scale for stereo depth estimation, where 1 uses the original 8K pixels (Ultra High) and 2, 4, 8 and 16 each process a quarter of the pixels of the step before. Default 1; this is the largest runtime lever in Voyager 1, about 80 minutes per 1000-frame transect.
+
+  - path: processing.metashape.defaults.depth_filter_mode
+    section: reconstruction
+    type: string
+    default: MildFiltering
+    choices: [NoFiltering, MildFiltering, ModerateFiltering, AggressiveFiltering]
+    label: Depth filtering
+    tooltip: Choose how aggressively Metashape discards small disconnected components from each depth map. Default MildFiltering, which keeps thin coral branches and the scale-bar targets; NoFiltering leaves a very noisy cloud and AggressiveFiltering strips small detail.
+
+  - path: processing.metashape.defaults.max_neighbors
+    section: reconstruction
+    type: integer
+    default: 16
+    min: 1
+    label: Depth map neighbours
+    tooltip: Set how many overlapping frames Metashape consults to build one camera's depth map. Default 16 spans several seconds of footage either side of a frame; each extra neighbour adds one stereo pair per camera.
+
+  - path: processing.metashape.defaults.surface_type
+    section: reconstruction
+    type: string
+    default: Arbitrary
+    choices: [Arbitrary, HeightField]
+    label: Surface type
+    tooltip: Choose Arbitrary to let the mesher build any shape, including overhangs and undercut colonies, or HeightField for a single-valued terrain surface that uses less memory. Default Arbitrary, because a height field flattens every undercut.
+
+  - path: processing.metashape.defaults.face_count
+    section: reconstruction
+    type: string
+    default: HighFaceCount
+    choices: [LowFaceCount, MediumFaceCount, HighFaceCount, CustomFaceCount]
+    label: Full mesh face count
+    tooltip: Choose the polygon budget preset for the full mesh Metashape builds from the depth maps. Default HighFaceCount, about 115 to 130 million faces for a 1000-frame transect, which the decimation factor then reduces for delivery.
+
+  - path: processing.metashape.defaults.interpolation
+    section: reconstruction
+    type: string
+    default: EnabledInterpolation
+    choices: [DisabledInterpolation, EnabledInterpolation, Extrapolated]
+    label: Mesh interpolation
+    tooltip: Choose how much surface the mesher fills between observed depth samples, where DisabledInterpolation leaves pinholes, EnabledInterpolation closes small gaps and Extrapolated fabricates surface across every hole. Default EnabledInterpolation.
+
+  - path: processing.metashape.defaults.vertex_colors
+    section: reconstruction
+    type: boolean
+    default: false
+    label: Vertex colours
+    tooltip: Tick this to have Metashape sample a colour per mesh vertex as well as building the texture. Default off; the texture carries the colour.
+
+  - path: processing.metashape.defaults.mapping_mode
+    section: scale_texture
+    type: string
+    default: GenericMapping
+    choices: [GenericMapping, OrthophotoMapping, AdaptiveOrthophotoMapping, SphericalMapping, CameraMapping, KeepUV]
+    label: UV mapping mode
+    tooltip: Choose how Metashape lays the mesh surface out onto texture pages. Default GenericMapping, the only mode that supports the multi-page atlases the page count formula produces.
+
+  - path: processing.metashape.defaults.texture_type
+    section: scale_texture
+    type: string
+    default: DiffuseMap
+    choices: [DiffuseMap, NormalMap, OcclusionMap]
+    label: Texture type
+    tooltip: Choose which channel the texture atlas holds. Default DiffuseMap, the colour image; NormalMap and OcclusionMap are shading aids that no later step reads.
+
+  - path: processing.metashape.defaults.blending_mode
+    section: scale_texture
+    type: string
+    default: MosaicBlending
+    choices: [MosaicBlending, AverageBlending, MaxBlending, MinBlending, DisabledBlending]
+    label: Blending mode
+    tooltip: Choose how colour from overlapping frames combines into each texel. Default MosaicBlending, which averages the low frequencies to hide seams and takes the fine detail from the sharpest frame; AverageBlending blurs, MaxBlending and MinBlending pick the brightest or darkest frame, and DisabledBlending takes one frame.
+
+  - path: processing.metashape.defaults.fill_holes
+    section: scale_texture
+    type: boolean
+    default: true
+    label: Fill texture holes
+    tooltip: Tick this to have Metashape paint the texels no camera sees, which avoids a salt-and-pepper look under branching corals. Default on; untick only to make coverage gaps visible.
+
+  - path: processing.metashape.defaults.ghosting_filter
+    section: scale_texture
+    type: boolean
+    default: true
+    label: Ghosting filter
+    tooltip: Tick this to have Metashape suppress fish, drifting particles and swaying tips that would leave ghosts in the texture. Default on; it can soften thin branch tips the mesh only partly captured.
+
+  - path: processing.metashape.defaults.enable_texture_gpu
+    section: scale_texture
+    type: boolean
+    default: false
+    label: Texture on GPU
+    tooltip: Tick this to leave the GPU enabled while Metashape blends the texture; untick to blend on the CPU. Default off, because GPU texture blending has a history of driver sensitivity; test on one transect before switching a batch.
+
+  - path: processing.metashape.defaults.fix_borders
+    section: reconstruction
+    type: boolean
+    default: true
+    label: Fix borders while smoothing
+    tooltip: Tick this to keep the open edges of the transect mesh in place while Metashape smooths the delivery mesh. Default on; untick it and the edges creep inward.
+
+  - path: processing.metashape.defaults.preserve_edges
+    section: reconstruction
+    type: boolean
+    default: false
+    label: Preserve sharp edges
+    tooltip: Tick this to keep sharp creases through the smoothing pass on the delivery mesh. Default off; reef surfaces have no creases worth protecting.
+
+  - path: processing.step1_products.gradual_selection_mode
+    section: alignment
+    type: string
+    default: capped
+    choices: [capped, legacy]
+    label: Tie point selection mode
+    tooltip: Choose capped for the widening, re-optimised selection that removes at most half the cloud per criterion, or legacy for one pass per criterion at the raw threshold with a single optimisation. Default capped, which turned 3 million tie points into about 0.95 million on 8K frames.
+
+  - path: processing.step1_products.scale_in_step1
+    section: scale_texture
+    type: boolean
+    default: true
+    label: Scale in step 1
+    tooltip: Tick this to have Voyager 1 detect the coded targets and apply the scale bars after the model builds; untick and every timepoint stays MANUAL_NEEDED with no detection cost. Default on.
+
+  - path: processing.step1_products.build_dem
+    section: reconstruction
+    type: boolean
+    default: true
+    label: Build DEM
+    tooltip: Tick this to have Metashape build an elevation model from the Ultra High depth maps and keep it inside the psx for step 2 to export. Default on; the DEM stage takes about 50 minutes per transect.
+
+  - path: processing.step1_products.dem_resolution
+    section: reconstruction
+    type: number
+    default: 0
+    min: 0
+    unit: m
+    label: DEM resolution (m per pixel)
+    tooltip: Set the elevation model resolution in metres per pixel, or 0 to let Metashape use the native resolution implied by the depth maps (about 0.12 to 0.13 mm at 8K). Default 0.
+
+  - path: processing.step1_products.delete_depth_maps
+    section: reconstruction
+    type: boolean
+    default: true
+    label: Delete depth maps
+    tooltip: Tick this to remove the depth maps from the chunk once the DEM is built, which roughly halves the psx bundle. Default on; untick only to rebuild a DEM or point cloud later without 80 minutes of depth maps.
+
+  - path: processing.step1_products.decimation_factor
+    section: reconstruction
+    type: integer
+    default: 10
+    min: 1
+    label: Decimation factor
+    tooltip: Set the divisor between the full mesh and the delivery mesh Voyager 1 textures and ships; 1 keeps the full mesh. Default 10 turns about 120 million faces into about 12 million.
+
+  - path: processing.step1_products.smooth_strength
+    section: reconstruction
+    type: integer
+    default: 4
+    min: 1
+    label: Smoothing strength
+    tooltip: Set the Laplacian smoothing strength Metashape applies to the decimated delivery mesh to remove faceting. Default 4, one more than the Metashape default of 3; 1 to 10 is the working range.
+
+  - path: processing.step1_products.texture_pixel_size
+    section: scale_texture
+    type: number
+    default: 0.0005
+    min: 0
+    min_exclusive: true
+    unit: m
+    label: Texture pixel size (m)
+    tooltip: Set the target size of one texel on the scaled mesh in metres; Voyager 1 converts it to a count of 8192 pixel pages. Default 0.0005 (half a millimetre); 0.0002 to 0.002 is the practical range.
+
+  - path: processing.step1_products.unscaled_page_count
+    section: scale_texture
+    type: integer
+    default: 4
+    min: 1
+    label: Unscaled page count
+    tooltip: Set the fixed number of 8192 pixel texture pages Voyager 1 uses when the scale decision is not PASS and the mesh area is in arbitrary units. Default 4; 1 to 8 is practical.
+
+  - path: processing.model_processing.has_coded_scales
+    section: scale_texture
+    type: boolean
+    default: true
+    label: Coded scale targets present
+    tooltip: Tick this when the transect carries printed coded targets, so Voyager 1 runs target detection and builds the scale bars; untick and the model stays in arbitrary units. Default on.
+
+  - path: processing.model_processing.scale_bars
+    section: scale_texture
+    type: list
+    default:
+      - start_marker: target 1000
+        end_marker: target 1010
+        distance: 0.75
+      - start_marker: target 1020
+        end_marker: target 1030
+        distance: 0.75
+    label: Scale bars
+    tooltip: List each bar as its two marker labels, as Metashape names them (target NNNN), and the centre-to-centre distance in metres. Default two 0.75 m bars, target 1000 to 1010 and target 1020 to 1030; a bar whose markers were not both detected is skipped with a warning.
+
+  - path: processing.model_processing.remove_unlisted_markers
+    section: scale_texture
+    type: boolean
+    default: true
+    label: Remove unlisted markers
+    tooltip: Tick this to have Voyager 1 delete every detected target that is not an endpoint of a listed scale bar. Default on; untick only to inspect stray targets in the Metashape GUI.
+
+  - path: processing.model_processing.marker_projection_prune
+    section: scale_texture
+    type: boolean
+    default: true
+    label: Prune marker projections
+    tooltip: Tick this to have Voyager 1 drop each marker's worst image projections, worst first, until the worst remaining error is under 0.8 px or only 5 projections remain. Default on; it brought worst-case target errors from 28 to 47 px down to under 1.2 px.
+
+  - path: processing.model_processing.scale_error_threshold
+    section: scale_texture
+    type: number
+    default: 0.009
+    min: 0
+    min_exclusive: true
+    unit: m
+    label: Scale error threshold (m)
+    tooltip: Set the ceiling, in metres, on the mean scale-bar residual that lets a timepoint PASS; at or over it Voyager 1 marks the timepoint MANUAL_NEEDED and processing continues. Default 0.009 (9 mm); 0.005 is conservative and 0.010 relaxed.

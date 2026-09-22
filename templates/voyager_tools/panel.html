@@ -1,0 +1,240 @@
+{#
+  File:    templates/voyager_tools/panel.html
+  Purpose: The Voyager tools fragment (program spec section 7, converted to
+           the design language of docs/superpowers/specs/2026-09-02-workflow
+           -page-design.md and 2026-09-02-matrix-window-design.md): a left
+           list of the eight tools and one pane each. Var-free: the desktop
+           window and the standalone page include the same markup, and
+           static/voyager_tools.js fills every list from the JSON API under
+           data-vt-base. The root <section class="voyager-tools"> is what
+           views.fragment_payload slices out for the desktop. Chrome
+           (.head/.title/.tip), choices (.choices/.opt/.opts/.dd-list),
+           buttons (.btn/.btn-primary/.btn-danger/.btn-mini), result lines
+           (.result/.result-error), row lists (.rows/.row/.row-name/
+           .row-meta/.row-state/.row-act), the details expander (.src) and
+           the footer (.foot/.stamp) come from the shared block
+           (vicarius_workflow.css) and the state-role chips from
+           vicarius_roles.css; every other rule is page-specific, scoped
+           under .voyager-tools in static/voyager_tools.css.
+#}
+<section class="voyager-tools" id="vt-root" data-vt-base="/voyager-tools" data-vt-version="20260906a">
+
+  <header class="head">
+    <h1 class="title" id="vt-title">Voyager tools</h1>
+    <button type="button" class="tip" aria-label="About Voyager tools" title="Voyager tools is the admin page of the Voyager program, one tool per tab at the left. VICARIUS signs every write here voyager_tools:&lt;initials&gt; in the registry events."><span>i</span></button>
+  </header>
+
+  <dl class="choices vt-header-choices">
+    <div>
+      <dt><label for="vt-initials">Your initials</label>
+          <button type="button" class="tip" aria-label="About your initials" title="Type the initials every save is signed with. VICARIUS writes them as voyager_tools:&lt;initials&gt; into the registry events, the job history and the voyagerparams commits, and remembers them in this browser."><span>?</span></button></dt>
+      <dd><input type="text" id="vt-initials" class="w-initials" maxlength="8" autocomplete="off" spellcheck="false"></dd>
+    </div>
+  </dl>
+  <p class="result result-error" data-vt="admin-line" hidden></p>
+
+  <section class="stages vt-stages" aria-label="Voyager tools">
+    <nav class="vt-nav" role="tablist" aria-label="Tools" aria-orientation="vertical">
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="order" aria-controls="vt-order" aria-selected="true" title="Show the processing order table: reorder the transects Voyager 1 has not started, save the order, and lock it in.">Atlas edit</button>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="workbench" aria-controls="vt-workbench" aria-selected="false" title="Show every processing folder left on the Workbench with its Shelf comparison, and delete the copies that match.">Clean workbench</button>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="manual" aria-controls="vt-manual" aria-selected="false" title="Show the manual edit job in progress and cancel it when it went wrong.">Clean manual edit run</button>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="rewind" aria-controls="vt-rewind" aria-selected="false" title="Take one timepoint back to before step 1 or before step 0, after a dry run lists what would change.">Rewind</button>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="spot" aria-controls="vt-spot" aria-selected="false" title="Rewind one timepoint to before step 1 and mark it for another Voyager 1 run.">Spot redo</button>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="prompts" aria-controls="vt-prompts" aria-selected="false" title="Show the back-of-house guide to cataloguing a season and the prompts to give an agent.">Prompts doc</button>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="params" aria-controls="vt-params" aria-selected="false" title="Show every parameter version and branch in voyagerparams, edit the values, and save a branch or a new default.">Parameter defaults</button>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="seasons" aria-controls="vt-seasons" aria-selected="false" title="Show the camera model, preprocessing and notes recorded for every season, and edit them.">Camera model</button>
+    </nav>
+
+    <div class="vt-panes">
+
+      {# 1. Atlas edit: the processing order #}
+      <section class="vt-pane" id="vt-order" role="tabpanel" data-vt-pane="order" aria-labelledby="vt-order-h">
+        <div class="pane-head">
+          <h2 id="vt-order-h">Processing order</h2>
+          <button type="button" class="tip" aria-label="About the processing order" title="The processing order is the queue Voyager 1 works through: positions 1 to N over every row in processing_order.csv beside the registry. Rows of one transect stay together and in date order because the shared Metashape project appends forward only, and a row Voyager 1 has already touched keeps its place among the started rows."><span>i</span></button>
+        </div>
+        <p class="count vt-line" data-vt="order-lock"></p>
+        <dl class="choices vt-order-toolbar" data-vt="order-toolbar">
+          <div>
+            <dt><label for="vt-order-moveto">Move selected to</label>
+                <button type="button" class="tip" aria-label="About moving a selection" title="Type the position to move every ticked block to, counted only among the blocks not ticked. VICARIUS keeps the blocks' order while moving them together, and applies the move when you save the order."><span>?</span></button></dt>
+            <dd>
+              <span class="count" data-vt="order-select-count">0 selected</span>
+              <input type="number" id="vt-order-moveto" class="vt-field vt-order-moveto" data-vt="order-move-to" min="1" step="1" inputmode="numeric" placeholder="#">
+              <button type="button" class="btn btn-mini" data-vt="order-move-btn" title="Move every ticked block to the typed position, keeping their own order. VICARIUS shows an error if nothing is ticked, the position is not a whole number, or the order is locked.">Move selected</button>
+              <button type="button" class="btn btn-mini" data-vt="order-clear-btn">Clear selection</button>
+            </dd>
+          </div>
+        </dl>
+        <ul class="rows" data-vt="order-body"></ul>
+        <details class="src" data-vt="order-started-wrap">
+          <summary data-vt="order-started-summary">Rows already started</summary>
+          <ul data-vt="order-started"></ul>
+        </details>
+        <p class="count vt-line" data-vt="order-skipped" hidden></p>
+        <div class="actions">
+          <button type="button" class="btn btn-primary" data-vt="order-save" title="Save the block order shown as the new processing order. VICARIUS renumbers every row from 1 and writes one processing_order event carrying the old and the new list.">Save order</button>
+          <button type="button" class="btn" data-vt="order-lock-btn" title="Lock the processing order so nobody can change it until it is unlocked. VICARIUS first asks for a confirmation that names the count and the first and last ids, then stamps every line with the time and your initials.">Lock order in</button>
+          <button type="button" class="btn" data-vt="order-unlock-btn" title="Unlock the processing order so it can be changed again. VICARIUS clears the lock stamp from every line and writes one event.">Unlock</button>
+        </div>
+        <p class="result" data-vt="order-result" role="status"></p>
+      </section>
+
+      {# 2. Clean workbench #}
+      <section class="vt-pane" id="vt-workbench" role="tabpanel" data-vt-pane="workbench" aria-labelledby="vt-workbench-h" hidden>
+        <div class="pane-head">
+          <h2 id="vt-workbench-h">Clean workbench</h2>
+          <button type="button" class="tip" aria-label="About the Workbench" title="The Workbench is the local processing root the Carousel works in (defaults.workbench_root in the Carousel's config/nas.yaml) and the Shelf is the NAS deposit root. A local processing folder can go when its registry rows place the transect on the Shelf and the Shelf copy matches it file for file by name and size."><span>i</span></button>
+        </div>
+        <p class="count vt-line" data-vt="wb-roots"></p>
+        <div class="actions vt-actions-top">
+          <button type="button" class="btn btn-primary" data-vt="wb-scan" title="Scan the Workbench roots for processing folders and compare each to its Shelf copy over ssh. VICARIUS lists every difference and offers Delete only when the two copies match.">Scan the Workbench</button>
+        </div>
+        <ul class="rows" data-vt="wb-body"></ul>
+        <ul class="vt-problems" data-vt="wb-problems"></ul>
+        <p class="result" data-vt="wb-result" role="status"></p>
+      </section>
+
+      {# 3. Clean manual edit run #}
+      <section class="vt-pane" id="vt-manual" role="tabpanel" data-vt-pane="manual" aria-labelledby="vt-manual-h" hidden>
+        <div class="pane-head">
+          <h2 id="vt-manual-h">Clean manual edit run</h2>
+          <button type="button" class="tip" aria-label="About manual edit jobs" title="A manual edit job brings finished reconstructions down to the edit bench, a local folder VICARIUS owns, for hand edits in Metashape and certification; one job runs at a time. Cancelling it here puts every row back to awaiting with its Shelf location and clears the current-job pointer."><span>i</span></button>
+        </div>
+        <div data-vt="me-summary"></div>
+        <div class="actions">
+          <button type="button" class="btn" data-vt="me-refresh">Refresh</button>
+          <button type="button" class="btn btn-danger" data-vt="me-cancel" title="Cancel the current manual edit job after the confirmation. VICARIUS marks it cancelled, removes the edit bench copies when the job never reached the push to the Shelf, restores each row's processing location and sets manual_edit_status back to awaiting.">Cancel and prune</button>
+        </div>
+        <p class="result" data-vt="me-result" role="status"></p>
+      </section>
+
+      {# 4. Rewind #}
+      <section class="vt-pane" id="vt-rewind" role="tabpanel" data-vt-pane="rewind" aria-labelledby="vt-rewind-h" hidden>
+        <div class="pane-head">
+          <h2 id="vt-rewind-h">Rewind</h2>
+          <button type="button" class="tip" aria-label="About rewinds" title="A rewind takes one timepoint back to before step 1 (the Metashape reconstruction) or before step 0 (the frame extraction): its report and frames move into the processing folder's _rewind/&lt;stamp&gt;/ folder, its chunk leaves the shared project through Metashape, its status.csv cells clear and its registry cells reset with one event each. VICARIUS refuses while the row is processing, while its folder is on the NAS, or while the row sits in the manual edit job."><span>i</span></button>
+        </div>
+        <dl class="choices">
+          <div>
+            <dt><label for="vt-rw-row">Timepoint</label><button type="button" class="tip" aria-label="About the timepoint choice" title="Choose the timepoint to rewind. VICARIUS lists every row Voyager 1 has touched; a row whose processing folder is on the NAS shows the Carousel pull-back command instead of rewinding."><span>?</span></button></dt>
+            <dd><select id="vt-rw-row" class="vt-field" data-vt="rw-row"></select></dd>
+          </div>
+          <div>
+            <dt><span id="vt-rw-target-label">Target</span></dt>
+            <dd role="radiogroup" aria-labelledby="vt-rw-target-label">
+              <label class="opt" title="Pick this to remove the reconstruction only: the chunk, the report and the step 1 cells go and the extracted frames stay."><input type="radio" name="vt-rw-target" value="before_step1" checked> Before step 1</label>
+              <label class="opt" title="Pick this to remove the reconstruction and the extracted frames, so the next Voyager 1 run extracts frames again."><input type="radio" name="vt-rw-target" value="before_step0"> Before step 0</label>
+            </dd>
+          </div>
+        </dl>
+        <div class="actions">
+          <button type="button" class="btn btn-primary" data-vt="rw-dry" title="Preview the artifacts and registry cells the rewind would touch.">Dry run</button>
+          <button type="button" class="btn btn-danger" data-vt="rw-apply" disabled title="Carry out the rewind shown after the confirmation. VICARIUS moves the artifacts into _rewind, removes the chunk through Metashape, and clears status.csv and the registry cells.">Apply rewind</button>
+        </div>
+        <div class="vt-plan" data-vt="rw-plan"></div>
+        <p class="result" data-vt="rw-result" role="status"></p>
+      </section>
+
+      {# 5. Spot redo #}
+      <section class="vt-pane" id="vt-spot" role="tabpanel" data-vt-pane="spot" aria-labelledby="vt-spot-h" hidden>
+        <div class="pane-head">
+          <h2 id="vt-spot-h">Spot redo</h2>
+          <button type="button" class="tip" aria-label="About spot redos" title="A spot redo is a rewind before step 1 plus a voyager1 fact named spot_redo on the row, so the Voyager 1 setup window offers the timepoint again and passes --force for it. The same control is reserved for Voyager 2 and Vigil."><span>i</span></button>
+        </div>
+        <dl class="choices">
+          <div>
+            <dt><label for="vt-sr-row">Timepoint</label><button type="button" class="tip" aria-label="About the timepoint choice" title="Choose the timepoint to redo. VICARIUS lists every row Voyager 1 has touched and refuses one whose folder is on the NAS or that sits in the manual edit job."><span>?</span></button></dt>
+            <dd><select id="vt-sr-row" class="vt-field" data-vt="sr-row"></select></dd>
+          </div>
+        </dl>
+        <div class="actions">
+          <button type="button" class="btn btn-primary" data-vt="sr-dry" title="Preview the artifacts and registry cells the redo would touch.">Dry run</button>
+          <button type="button" class="btn btn-danger" data-vt="sr-apply" disabled title="Carry out the rewind before step 1 and record the spot_redo fact after the confirmation. VICARIUS then lists the timepoint as eligible in Voyager 1 setup.">Redo this timepoint</button>
+        </div>
+        <div class="vt-plan" data-vt="sr-plan"></div>
+        <p class="result" data-vt="sr-result" role="status"></p>
+      </section>
+
+      {# 6. Prompts doc #}
+      <section class="vt-pane" id="vt-prompts" role="tabpanel" data-vt-pane="prompts" aria-labelledby="vt-prompts-h" hidden>
+        <div class="pane-head">
+          <h2 id="vt-prompts-h">Prompts doc</h2>
+          <button type="button" class="tip" aria-label="About the prompts document" title="The prompts document is the back-of-house guide to cataloguing a season: the atlascatalog command and its switches, the needs-attention review, the LBH kind of conflict, deleting a season, the handoff rules and the prompts to give an agent. VICARIUS renders docs/agents/voyager-ingest-prompts.md from the harness root on every open."><span>i</span></button>
+        </div>
+        <p class="count vt-line" data-vt="pr-path"></p>
+        <div class="actions vt-actions-top">
+          <button type="button" class="btn" data-vt="pr-reload">Reload</button>
+        </div>
+        <article class="vt-doc" data-vt="pr-doc"></article>
+        <p class="result" data-vt="pr-result" role="status"></p>
+      </section>
+
+      {# 7. Parameter defaults #}
+      <section class="vt-pane" id="vt-params" role="tabpanel" data-vt-pane="params" aria-labelledby="vt-params-h" hidden>
+        <div class="pane-head">
+          <h2 id="vt-params-h">Parameter defaults</h2>
+          <button type="button" class="tip" aria-label="About parameter versions" title="The analysis parameters of Voyager 1 and Voyager 2 live as versioned files in the public voyagerparams repository: numbered versions (the default is the one DEFAULT names), branches for named variants, and custom sets saved per run. A default save bumps MINOR when values change and MAJOR when a key is added, removed or renamed, a branch starts at the default's version, and every save is committed and pushed."><span>i</span></button>
+        </div>
+        <dl class="choices">
+          <div>
+            <dt><label for="vt-pm-phase">Phase</label><button type="button" class="tip" aria-label="About the phase choice" title="Choose the phase whose parameters to list. Voyager 1 keys carry the full editor schema; Voyager 2 keys are a draft edited through the YAML box."><span>?</span></button></dt>
+            <dd><select id="vt-pm-phase" class="vt-field" data-vt="pm-phase"><option value="voyager1">Voyager 1</option><option value="voyager2">Voyager 2</option></select></dd>
+          </div>
+        </dl>
+        <ul class="rows" data-vt="pm-body"></ul>
+        <p class="count vt-line" data-vt="pm-loaded"></p>
+        <form class="vt-editor" data-vt="pm-editor" autocomplete="off"></form>
+        <dl class="choices">
+          <div>
+            <dt><label for="vt-pm-yaml">YAML box</label><button type="button" class="tip" aria-label="About the YAML box" title="Type YAML here to add or change fields on top of the editor values; a new key makes the next default save a MAJOR bump. VICARIUS merges it over the editor values before validating."><span>?</span></button></dt>
+            <dd><textarea id="vt-pm-yaml" class="vt-field vt-yaml" rows="6" spellcheck="false" data-vt="pm-yaml"></textarea></dd>
+          </div>
+        </dl>
+        <div class="actions">
+          <button type="button" class="btn" data-vt="pm-validate" title="Check the editor values and the YAML box against the schema and show the difference from the default without saving.">Validate</button>
+        </div>
+        <div class="vt-diff" data-vt="pm-diff"></div>
+        <fieldset class="vt-fieldset">
+          <legend>Save as branch</legend>
+          <dl class="choices">
+            <div>
+              <dt><label for="vt-pm-slug">Branch name</label><button type="button" class="tip" aria-label="About the branch name" title="Type the branch name: lowercase letters, digits, underscore or hyphen, up to 40 characters. VICARIUS writes branches/&lt;name&gt;/v&lt;version&gt;.yaml under the phase."><span>?</span></button></dt>
+              <dd><input type="text" id="vt-pm-slug" class="w-name" maxlength="40" data-vt="pm-slug"></dd>
+            </div>
+            <div>
+              <dt><label for="vt-pm-desc">Description</label><button type="button" class="tip" aria-label="About the description" title="Describe what this branch changes in one line. VICARIUS puts it in the file header and the commit message."><span>?</span></button></dt>
+              <dd><input type="text" id="vt-pm-desc" class="w-name" maxlength="2000" data-vt="pm-desc"></dd>
+            </div>
+            <div>
+              <dt><label for="vt-pm-why">Why</label><button type="button" class="tip" aria-label="About the why line" title="Say why the branch exists, for example the site or season it was tuned for. VICARIUS keeps it in the file header."><span>?</span></button></dt>
+              <dd><input type="text" id="vt-pm-why" class="w-name" maxlength="2000" data-vt="pm-why"></dd>
+            </div>
+          </dl>
+          <div class="actions">
+            <button type="button" class="btn btn-primary" data-vt="pm-branch" title="Save the values as a file of the named branch and commit and push it to the voyagerparams repository. A branch never moves the default.">Save as branch</button>
+            <button type="button" class="btn btn-danger" data-vt="pm-default" title="Save the values as the next numbered version and point DEFAULT at it, after a confirmation. VICARIUS states the significance, takes a description, then commits and pushes.">Save as default</button>
+          </div>
+        </fieldset>
+        <p class="result" data-vt="pm-result" role="status"></p>
+        <p class="count vt-line" data-vt="pm-git"></p>
+      </section>
+
+      {# 8. Camera model #}
+      <section class="vt-pane" id="vt-seasons" role="tabpanel" data-vt-pane="seasons" aria-labelledby="vt-seasons-h" hidden>
+        <div class="pane-head">
+          <h2 id="vt-seasons-h">Camera model</h2>
+          <button type="button" class="tip" aria-label="About seasons" title="A season is one year and token (spring _pbl, annual ann); its camera model and preprocessing describe how every video of that season was filmed and prepared. VICARIUS shows them in the atlas tooltips on the timepoint headers and season cells."><span>i</span></button>
+        </div>
+        <ul class="rows" data-vt="se-body"></ul>
+        <p class="result" data-vt="se-result" role="status"></p>
+      </section>
+
+    </div>
+  </section>
+
+  <footer class="foot">
+    <span class="stamp" data-vt="stamp"></span>
+    <span>Voyager tools - built by Lauren Olinger</span>
+  </footer>
+</section>

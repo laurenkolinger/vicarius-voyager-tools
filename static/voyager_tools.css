@@ -1,0 +1,270 @@
+/* static/voyager_tools.css - the Voyager tools fragment, every rule scoped
+ * under .voyager-tools so the sheet is safe on the standalone page and
+ * inside a desktop window. The chrome, the definition list, the buttons,
+ * the result line, the row lists and the footer are the shared block
+ * (vicarius_workflow.css, linked by the standalone page and injected scoped
+ * by voyager_tools.js when a host page has not linked it); the state-role
+ * chips are vicarius_roles.css. Tokens are read by their shared names with
+ * the design's literal values as fallbacks
+ * (docs/superpowers/specs/2026-09-02-workflow-page-design.md section 2).
+ * This file carries only what the shared block does not: the left list of
+ * eight tools (not a stage rail, since the tools are not a sequence), the
+ * generic select and textarea sizing the shared block leaves to the page,
+ * the confirm dialog, the parameter editor, the diff list, the rewind plan
+ * and the rendered prompts document.
+ */
+
+.voyager-tools {
+  container-type: inline-size;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--text, #F5EDF0);
+  font: 400 13px/1.5 var(--font-body, 'Inter', ui-sans-serif, -apple-system, sans-serif);
+}
+.voyager-tools *, .voyager-tools *::before, .voyager-tools *::after { box-sizing: border-box; }
+.voyager-tools .vt-line { display: block; margin: 4px 0 8px; }
+.voyager-tools .vt-header-choices { margin-bottom: 4px; }
+.voyager-tools .vt-site { font-weight: 500; }
+.voyager-tools .vt-log {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  max-height: 220px;
+  overflow: auto;
+  background: var(--bg-deep, #050508);
+  border: 1px solid var(--border-dim, #1d1d26);
+  border-radius: var(--radius, 2px);
+  font: 400 11px/1.5 var(--font-mono, 'Space Mono', ui-monospace, monospace);
+  color: var(--text-dim, #b0a7ab);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* -- the left list of eight tools and the pane grid ---------------------- */
+.voyager-tools .vt-stages {
+  display: grid;
+  grid-template-columns: 212px minmax(0, 1fr);
+  border: 1px solid var(--border, #2a2a38);
+  border-radius: var(--radius-lg, 3px);
+  background: var(--surface, #11111a);
+  margin-top: 4px;
+}
+.voyager-tools .vt-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 8px;
+  background: var(--bg, #0a0a0f);
+  border-right: 1px solid var(--border, #2a2a38);
+  border-radius: var(--radius-lg, 3px) 0 0 var(--radius-lg, 3px);
+}
+.voyager-tools .vt-tab {
+  text-align: left;
+  padding: 8px 10px;
+  min-height: 34px;
+  background: transparent;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: var(--radius, 2px);
+  color: var(--text-dim, #b0a7ab);
+  font: 600 13px/1.3 var(--font-display, 'Syne', sans-serif);
+}
+.voyager-tools .vt-tab:hover { color: var(--text, #F5EDF0); background: var(--surface-light, #191926); }
+.voyager-tools .vt-tab[aria-selected="true"] {
+  color: var(--text, #F5EDF0);
+  border-left-color: var(--magenta, #E20074);
+  background: rgba(226, 0, 116, 0.08);
+}
+.voyager-tools .vt-tab:focus-visible { outline: 2px solid var(--pink, #FFB3D9); outline-offset: -2px; }
+.voyager-tools .vt-panes { min-width: 0; }
+.voyager-tools .vt-pane { padding: 16px 20px 20px; min-width: 0; }
+
+/* -- generic field sizing the shared block leaves to the page ------------ */
+.voyager-tools .vt-field {
+  min-height: 30px;
+  padding: 0 10px;
+  background: var(--input-bg, #15151f);
+  border: 1px solid var(--border, #2a2a38);
+  border-radius: var(--radius, 2px);
+  color: var(--text, #F5EDF0);
+  font: 400 12px/1.5 var(--font-mono, 'Space Mono', ui-monospace, monospace);
+  max-width: 100%;
+}
+.voyager-tools .vt-field:focus-visible { outline: 2px solid var(--pink, #FFB3D9); outline-offset: 1px; border-color: var(--magenta, #E20074); }
+.voyager-tools select.vt-field { min-width: 260px; }
+.voyager-tools textarea.vt-yaml { width: 100%; min-height: 96px; padding: 8px 10px; resize: vertical; }
+
+/* -- rows: order, workbench, params, seasons, manual-edit summaries ------ */
+.voyager-tools .row[draggable="true"] { cursor: grab; }
+.voyager-tools .row.is-dragging { opacity: 0.45; }
+.voyager-tools .row.is-drop-before { box-shadow: inset 0 2px 0 var(--magenta, #E20074); }
+.voyager-tools .row.is-drop-after { box-shadow: inset 0 -2px 0 var(--magenta, #E20074); }
+
+/* -- the processing order table: multi-select, typed position, keyboard --
+   handle (T20260906-213500-1). The shared .row grid is two columns (name,
+   act); order rows get a third leading column for the handle, the select
+   checkbox and the position field, ahead of the transect name. */
+.voyager-tools #vt-order .row.vt-order-row {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: 12px;
+}
+.voyager-tools .vt-order-row.is-selected { background: rgba(226, 0, 116, 0.06); }
+.voyager-tools .vt-order-lead { grid-column: 1; display: inline-flex; align-items: center; gap: 10px; }
+.voyager-tools .vt-order-row .row-name { grid-column: 2; }
+.voyager-tools .vt-order-row .row-act { grid-column: 3; }
+.voyager-tools .vt-order-handle {
+  min-height: 28px;
+  min-width: 28px;
+  padding: 0 4px;
+  background: transparent;
+  border: 1px solid var(--border, #2a2a38);
+  border-radius: var(--radius, 2px);
+  color: var(--text-dim, #b0a7ab);
+  font: 700 12px/1 var(--font-mono, 'Space Mono', ui-monospace, monospace);
+  cursor: grab;
+}
+.voyager-tools .vt-order-handle:hover { border-color: var(--magenta, #E20074); color: var(--text, #F5EDF0); }
+.voyager-tools .vt-order-select { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; cursor: pointer; }
+.voyager-tools .vt-order-select span { font: 400 10px/1 var(--font-mono, 'Space Mono', ui-monospace, monospace); color: var(--text-dim, #b0a7ab); }
+.voyager-tools .vt-order-pos-wrap { display: inline-flex; align-items: center; gap: 4px; }
+.voyager-tools .vt-order-pos-wrap label { font: 400 10px/1 var(--font-mono, 'Space Mono', ui-monospace, monospace); color: var(--text-dim, #b0a7ab); }
+.voyager-tools .vt-order-pos { width: 56px; min-height: 28px; padding: 0 6px; text-align: right; }
+.voyager-tools .vt-order-toolbar dd { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.voyager-tools .vt-order-moveto { width: 72px; text-align: right; }
+.voyager-tools .row-fields {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 2px;
+}
+.voyager-tools .opt-field { display: flex; flex-direction: column; gap: 2px; min-width: 160px; flex: 1 1 200px; }
+.voyager-tools .vt-field-label { font: 500 11px/1.4 var(--font-body, 'Inter', ui-sans-serif, sans-serif); color: var(--text-dim, #b0a7ab); }
+.voyager-tools .row-name a.id.code { text-decoration: none; }
+.voyager-tools .row-name a.id.code:hover { border-color: var(--pink, #FFB3D9); color: var(--pink, #FFB3D9); }
+.voyager-tools .row-meta .row-body { grid-column: 1 / -1; }
+.voyager-tools .rows:empty { display: none; }
+.voyager-tools .row .chip { position: relative; top: 1px; margin-right: 2px; }
+
+/* -- result modifier the shared block does not define --------------------
+   .result / .result-error come from the shared block; a warning tint is a
+   page addition since only success and error are defined there. */
+.voyager-tools .result.is-warn { border-color: rgba(255, 184, 0, 0.35); border-left-color: var(--warning, #FFB800); background: rgba(255, 184, 0, 0.05); }
+.voyager-tools .result pre { flex-basis: 100%; margin: 4px 0 0; padding: 6px 8px; background: var(--bg-deep, #050508); border: 1px solid var(--border-dim, #1d1d26); overflow-x: auto; white-space: pre; }
+.voyager-tools .result ul { flex-basis: 100%; margin: 4px 0 0; padding-left: 18px; }
+.voyager-tools .vt-problems { margin: 0 0 8px; padding-left: 18px; color: var(--warning, #FFB800); font-size: 12px; }
+.voyager-tools .vt-problems:empty { display: none; }
+
+/* -- the rewind plan and the diff list ------------------------------------ */
+.voyager-tools .vt-plan:empty, .voyager-tools .vt-diff:empty { display: none; }
+.voyager-tools .vt-plan {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--bg, #0a0a0f);
+  border: 1px solid var(--border-dim, #1d1d26);
+  border-radius: var(--radius, 2px);
+}
+.voyager-tools .vt-plan h3 { margin: 12px 0 2px; font: 700 13px/1.3 var(--font-display, 'Syne', sans-serif); }
+.voyager-tools .vt-plan h3:first-child { margin-top: 0; }
+.voyager-tools .vt-plan p.count { margin: 0 0 4px; }
+.voyager-tools .vt-plan .rows { margin-top: 2px; }
+.voyager-tools .vt-plan .row { padding: 6px 0; grid-template-columns: minmax(0, 1fr); }
+.voyager-tools .vt-plan .row-name { font-size: 12px; }
+.voyager-tools .vt-plan .row-meta { grid-column: 1; color: var(--text-dim, #b0a7ab); }
+.voyager-tools .vt-plan .row-meta.is-warn { color: var(--warning, #FFB800); }
+.voyager-tools .vt-diff {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: var(--bg, #0a0a0f);
+  border: 1px solid var(--border-dim, #1d1d26);
+  border-radius: var(--radius, 2px);
+  font: 400 11px/1.6 var(--font-mono, 'Space Mono', ui-monospace, monospace);
+}
+.voyager-tools .vt-diff ul { margin: 0; padding-left: 18px; }
+.voyager-tools .vt-diff .is-added { color: var(--success, #00FFB3); }
+.voyager-tools .vt-diff .is-removed { color: var(--error, #FF4D6D); }
+.voyager-tools .vt-diff .is-changed { color: var(--warning, #FFB800); }
+
+/* -- the parameter editor -------------------------------------------------- */
+.voyager-tools .vt-editor:empty { display: none; }
+.voyager-tools .vt-editor fieldset {
+  border: 1px solid var(--border-dim, #1d1d26);
+  border-radius: var(--radius, 2px);
+  padding: 4px 12px 8px;
+  margin: 10px 0;
+}
+.voyager-tools .vt-editor legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font: 700 13px/1.3 var(--font-display, 'Syne', sans-serif);
+  padding: 0 4px;
+}
+.voyager-tools .vt-editor .choices { margin: 0; }
+.voyager-tools .vt-editor input[type="number"], .voyager-tools .vt-editor input[type="text"] { width: 100%; max-width: 320px; }
+.voyager-tools .vt-editor textarea.vt-field { width: 100%; min-height: 56px; }
+.voyager-tools .vt-fieldset {
+  border: 1px solid var(--border-dim, #1d1d26);
+  border-radius: var(--radius, 2px);
+  padding: 8px 12px 12px;
+  margin: 16px 0 0;
+}
+.voyager-tools .vt-fieldset legend { font: 700 13px/1.3 var(--font-display, 'Syne', sans-serif); padding: 0 4px; }
+.voyager-tools .vt-fieldset .choices { margin: 0; }
+
+/* -- the rendered prompts document ---------------------------------------- */
+.voyager-tools .vt-doc { max-width: 78ch; margin-top: 4px; }
+.voyager-tools .vt-doc h1, .voyager-tools .vt-doc h2, .voyager-tools .vt-doc h3 { font-family: var(--font-display, 'Syne', sans-serif); line-height: 1.3; }
+.voyager-tools .vt-doc h1 { font-size: 18px; }
+.voyager-tools .vt-doc h2 { font-size: 16px; }
+.voyager-tools .vt-doc h3 { font-size: 14px; }
+.voyager-tools .vt-doc code { font-family: var(--font-mono, 'Space Mono', ui-monospace, monospace); font-size: 11px; background: var(--bg-deep, #050508); padding: 1px 4px; border-radius: var(--radius, 2px); }
+.voyager-tools .vt-doc pre { padding: 10px; background: var(--bg-deep, #050508); border: 1px solid var(--border-dim, #1d1d26); overflow-x: auto; }
+.voyager-tools .vt-doc pre code { background: none; padding: 0; }
+.voyager-tools .vt-doc a { color: var(--pink, #FFB3D9); }
+.voyager-tools .vt-doc table { border-collapse: collapse; margin: 8px 0; }
+.voyager-tools .vt-doc th, .voyager-tools .vt-doc td { border: 1px solid var(--border-dim, #1d1d26); padding: 4px 8px; text-align: left; }
+
+/* -- the confirm dialog ---------------------------------------------------- */
+.voyager-tools .vt-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(5, 5, 8, 0.72);
+}
+.voyager-tools .vt-dialog {
+  width: min(520px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  padding: 20px 24px 24px;
+  background: var(--surface, #11111a);
+  border: 1px solid var(--magenta, #E20074);
+  border-radius: var(--radius-lg, 3px);
+  box-shadow: 0 8px 32px rgba(5, 5, 8, 0.8);
+}
+.voyager-tools .vt-dialog h3 { margin: 0 0 12px; font: 700 16px/1.25 var(--font-display, 'Syne', sans-serif); }
+.voyager-tools .vt-dialog p { margin: 0 0 8px; }
+.voyager-tools .vt-dialog label { display: block; margin: 10px 0 4px; font: 500 13px/1.4 var(--font-body, 'Inter', ui-sans-serif, sans-serif); }
+.voyager-tools .vt-dialog input.vt-field { width: 100%; }
+.voyager-tools .vt-dialog .actions { justify-content: flex-end; }
+
+/* -- a narrow container (a desktop window, or the 946 px page) ------------ */
+@container (max-width: 760px) {
+  .voyager-tools .vt-stages { grid-template-columns: minmax(0, 1fr); }
+  .voyager-tools .vt-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    border-right: 0;
+    border-bottom: 1px solid var(--border, #2a2a38);
+    border-radius: var(--radius-lg, 3px) var(--radius-lg, 3px) 0 0;
+  }
+  .voyager-tools .vt-tab { border-left: 0; border-bottom: 2px solid transparent; }
+  .voyager-tools .vt-tab[aria-selected="true"] { border-bottom-color: var(--magenta, #E20074); }
+  .voyager-tools .vt-pane { padding: 12px 12px 16px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .voyager-tools .vt-tab { transition: background-color 120ms ease, border-color 120ms ease; }
+}
