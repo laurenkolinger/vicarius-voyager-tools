@@ -1,0 +1,212 @@
+# Voyager 2 parameter schema: every key of the `voyager2:` block that module
+# 3D_phase2 reads (vicarius/modules/3D_phase2/github_repo/config/
+# voyager2_defaults.yaml, validated by that module's src/params.py, which
+# refuses any other key), with the label, tooltip and validation the full
+# editor renders. The key set is program D's parameter body (spec
+# docs/superpowers/specs/2026-09-26-chain-d-voyager2-and-space-guard-design.md
+# section 4.15 as amended by Amendment 1 A1.4: grid.resolution_mm removed;
+# orthomosaic.resolution_mm, dem.resolution_mm, psx.save and
+# psx.keep_orthomosaic added) as the module ships it: its ADR 0002 records the
+# compute block, and the keys the module does not read (dem.interpolation,
+# orthomosaic.subdivide_task, the three work item sizes, orthomosaic.enable_gpu,
+# model_export.format) are left out, because a version file carrying them is
+# refused at launch. Types: integer, number, boolean, string, list. min and max
+# are inclusive unless min_exclusive or max_exclusive is true. Read by
+# voyagertools/paramsstore.py (validate_values) and by the Voyager tools
+# parameter editor.
+
+phase: voyager2
+template_version: v0.2.0
+schema_version: 1.0.0
+
+sections:
+  - id: resources
+    label: Disk, memory and cards
+    tooltip: These keys decide how much disk and memory Voyager 2 must find before it starts and whether Metashape uses the graphics cards.
+  - id: dem
+    label: DEM
+    tooltip: The DEM (digital elevation model) is the raster of seafloor height Voyager 2 exports as float metres for each timepoint, over the transect's one shared frame.
+  - id: orthomosaic
+    label: Orthomosaic
+    tooltip: The orthomosaic is the top-down photo map Voyager 2 builds from each timepoint's frames and exports over the transect's one shared frame for VIGIL.
+  - id: model_export
+    label: Model export
+    tooltip: Voyager 2 exports each timepoint's edited mesh as an OBJ file with its texture pages; these keys decide what the export carries.
+  - id: outputs
+    label: Report, preview and project
+    tooltip: These keys decide the extra products Voyager 2 writes into the output folder beside the rasters and the model.
+
+keys:
+  - path: voyager2.min_free_disk_gb
+    section: resources
+    type: number
+    default: 200
+    min: 0
+    unit: GB
+    label: Free disk to keep
+    tooltip: Type the GB of free space the output disk must keep after each heavy write. Voyager 2 refuses an export that would leave less, and 0 turns the check off.
+
+  - path: voyager2.output_estimate_gb_per_timepoint
+    section: resources
+    type: number
+    default: 60
+    min: 0
+    min_exclusive: true
+    unit: GB
+    label: Output per timepoint
+    tooltip: Type the GB one timepoint's products and its share of the Voyager 2 project are expected to take. Voyager 2 multiplies it by the timepoints of the run and refuses to start when the disk lacks that room.
+
+  - path: voyager2.compute.gpu_mask
+    section: resources
+    type: integer
+    default: 0
+    min: 0
+    max: 65535
+    label: Card mask
+    tooltip: Type which graphics cards Metashape may use as a bit mask, 1 for card 0, 2 for card 1, 3 for both. The default 0 runs Voyager 2 on the processors alone, so no card is touched and no GPU claim is taken.
+
+  - path: voyager2.compute.min_available_gb
+    section: resources
+    type: number
+    default: 40
+    min: 0
+    unit: GB
+    label: Memory for a processor run
+    tooltip: Type the GB of free system memory a run without cards needs at start. Beside an open manual edit window Voyager 2 asks for the larger of this and the GPU ladder's figure.
+
+  - path: voyager2.dem.source
+    section: dem
+    type: string
+    default: model
+    choices: [model, step1_elevation]
+    label: DEM source
+    tooltip: Pick model to rebuild the DEM from the edited mesh, or step1_elevation to export the elevation Voyager 1 built. The default model carries every manual edit into the DEM.
+
+  - path: voyager2.dem.resolution_mm
+    section: dem
+    type: number
+    default: 0
+    min: 0
+    unit: mm
+    label: DEM pixel size
+    tooltip: Type a pixel size in mm to export every DEM at that size. The default 0 keeps each timepoint's own elevation resolution after the edit.
+
+  - path: voyager2.orthomosaic.resolution_mm
+    section: orthomosaic
+    type: number
+    default: 0
+    min: 0
+    unit: mm
+    label: Orthomosaic pixel size
+    tooltip: Type a pixel size in mm to build every timepoint's orthomosaic at that one size. The default 0 builds each timepoint at its own full native resolution.
+
+  - path: voyager2.orthomosaic.surface
+    section: orthomosaic
+    type: string
+    default: model
+    choices: [model, elevation]
+    label: Surface
+    tooltip: Pick model to drape the photos on the edited mesh at full resolution, or elevation to project them on the DEM, which caps the orthomosaic at the DEM's pixel size.
+
+  - path: voyager2.orthomosaic.blending_mode
+    section: orthomosaic
+    type: string
+    default: MosaicBlending
+    choices: [MosaicBlending, AverageBlending, DisabledBlending]
+    label: Blending
+    tooltip: Pick how Metashape merges overlapping frames. The default MosaicBlending keeps the sharpest frame near each seam; AverageBlending softens detail and DisabledBlending takes one frame per pixel.
+
+  - path: voyager2.orthomosaic.fill_holes
+    section: orthomosaic
+    type: boolean
+    default: true
+    label: Fill holes
+    tooltip: Tick this to let Metashape fill small gaps in the orthomosaic from the neighbouring pixels. Default on.
+
+  - path: voyager2.orthomosaic.ghosting_filter
+    section: orthomosaic
+    type: boolean
+    default: false
+    label: Ghosting filter
+    tooltip: Tick this to have Metashape drop frames that show moving objects, such as fish, where frames overlap. Default off.
+
+  - path: voyager2.orthomosaic.cull_faces
+    section: orthomosaic
+    type: boolean
+    default: false
+    label: Cull faces
+    tooltip: Tick this to have Metashape skip mesh faces seen edge on when it projects the photos. Default off.
+
+  - path: voyager2.orthomosaic.refine_seamlines
+    section: orthomosaic
+    type: boolean
+    default: false
+    label: Refine seamlines
+    tooltip: Tick this to have Metashape move the seams between frames onto low-contrast areas. Default off.
+
+  - path: voyager2.model_export.texture_format
+    section: model_export
+    type: string
+    default: TIFF
+    choices: [TIFF, PNG, JPEG]
+    label: Texture format
+    tooltip: Pick the file format of the exported texture pages. The default TIFF keeps the full 16-bit colour of the frames; JPEG is smaller and lossy.
+
+  - path: voyager2.model_export.save_texture
+    section: model_export
+    type: boolean
+    default: true
+    label: Save texture
+    tooltip: Tick this to write the texture pages beside the OBJ file. Default on; without it the model has no photo colour.
+
+  - path: voyager2.model_export.save_uv
+    section: model_export
+    type: boolean
+    default: true
+    label: Save texture coordinates
+    tooltip: Tick this to write the texture coordinates that tie each mesh face to its place on a texture page. Default on; the texture cannot be applied without them.
+
+  - path: voyager2.model_export.save_normals
+    section: model_export
+    type: boolean
+    default: true
+    label: Save normals
+    tooltip: Tick this to write each vertex's surface direction into the OBJ file, which viewers use for shading. Default on.
+
+  - path: voyager2.model_export.save_colors
+    section: model_export
+    type: boolean
+    default: false
+    label: Save vertex colours
+    tooltip: Tick this to write a colour per vertex as well as the texture. Default off, since the texture already carries the colour and the file grows.
+
+  - path: voyager2.report.enabled
+    section: outputs
+    type: boolean
+    default: true
+    label: Processing report
+    tooltip: Tick this to have Voyager 2 write Metashape's PDF report of each timepoint into the reports folder of the output folder. Default on.
+
+  - path: voyager2.preview.max_side_px
+    section: outputs
+    type: integer
+    default: 2048
+    min: 64
+    max: 16384
+    unit: px
+    label: Preview size
+    tooltip: Type the longest side in pixels of the JPEG preview Voyager 2 writes of each orthomosaic, for the atlas and VIGIL to show quickly. Default 2048.
+
+  - path: voyager2.psx.save
+    section: outputs
+    type: boolean
+    default: true
+    label: Save the Voyager 2 project
+    tooltip: Tick this to save the Voyager 2 Metashape project into the psx folder of the output folder at the end of the run. Default on, so the products can be rebuilt or inspected later.
+
+  - path: voyager2.psx.keep_orthomosaic
+    section: outputs
+    type: boolean
+    default: true
+    label: Keep orthomosaics in the project
+    tooltip: Tick this to keep the orthomosaic assets inside the saved Voyager 2 project. Untick to have Voyager 2 remove them before the save, which makes the project much smaller.
