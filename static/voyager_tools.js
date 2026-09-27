@@ -7,8 +7,13 @@
  * double mount with data-vt-mounted, injects the scoped stylesheet when the
  * page did not link it, and wires the eight tools. Every request goes to
  * BASE + '/api/...' where BASE is data-vt-base on the root, or
- * window.VOYAGER_TOOLS_BASE, or '/voyager-tools'. A 401 shows the admin
- * line; a 423 shows the lock message. Destructive actions open a role=dialog
+ * window.VOYAGER_TOOLS_BASE, or '/voyager-tools'. A 401 or 403 carrying
+ * need_unlock, or a relock from window.VICADMINSESSION (the desktop's admin
+ * session script, decision 8 of the manual edit chain), hides the tools
+ * behind the admin line with an Unlock admin button, and the next unlock
+ * brings them back; a 423 shows the lock message. Every request gives up
+ * after REQUEST_TIMEOUT_MS with a sentence saying the action may still have
+ * happened. Destructive actions open a role=dialog
  * confirm that names what will change; Escape closes it without bubbling,
  * because the desktop closes a window on a bubbled Escape.
  *
@@ -53,6 +58,18 @@
   var TOOLS = ["order", "workbench", "manual", "rewind", "spot", "prompts", "params", "seasons"];
   var TARGET_WORDS = { before_step1: "before step 1", before_step0: "before step 0" };
   var GB = 1e9;
+  var REQUEST_TIMEOUT_MS = 30000;
+  var LINE_ADMIN_OFF = "Admin mode is off. Unlock admin to use Voyager tools.";
+  var LINE_TIMEOUT = "No answer from the desktop after 30 s; the action may still have happened. Reload the pane before trying again.";
+
+  function adminSession() { return window.VICADMINSESSION || null; }
+
+  // isLockedAnswer(status, body): 401 or 403 whose body carries need_unlock.
+  function isLockedAnswer(status, body) {
+    var session = adminSession();
+    if (session) return session.isLockedResponse(status, body);
+    return (status === 401 || status === 403) && !!body && body.need_unlock === true;
+  }
 
   /* ---- small helpers -------------------------------------------------- */
 
@@ -140,14 +157,29 @@
         init.headers["Content-Type"] = "application/json";
         init.body = JSON.stringify(opts.body);
       }
+      var controller = typeof AbortController === "function" ? new AbortController() : null;
+      var timer = null;
+      if (controller) {
+        init.signal = controller.signal;
+        timer = setTimeout(function () { controller.abort(); }, REQUEST_TIMEOUT_MS);
+      }
       return fetch(BASE + path, init).then(function (r) {
         return r.json().catch(function () { return {}; }).then(function (data) {
-          if (r.status === 401) showAdminLine("Admin mode is required for Voyager tools. Unlock admin from the ADMIN chip and open it again.");
-          else if (r.status === 423) showAdminLine(data.message || "Voyager tools is locked.");
+          if (isLockedAnswer(r.status, data)) {
+            var session = adminSession();
+            if (session) session.noteResponse(r.status, data);
+            showRelocked();
+          } else if (r.status === 423) {
+            showAdminLine(data.message || "Voyager tools is locked.");
+          }
           return { ok: r.ok, status: r.status, data: data };
         });
       }).catch(function (err) {
+        if (err && err.name === "AbortError") return { ok: false, status: 0, data: { error: LINE_TIMEOUT } };
         return { ok: false, status: 0, data: { error: "The request did not reach VICARIUS: " + err } };
+      }).then(function (res) {
+        if (timer !== null) clearTimeout(timer);
+        return res;
       });
     }
 
@@ -156,6 +188,53 @@
       if (!line) return;
       line.textContent = text;
       line.hidden = !text;
+    }
+
+    /* -- the admin lock ------------------------------------------------------ */
+    // showRelocked(): admin mode ended; the tools hide behind the admin line
+    // and its Unlock admin button until the next unlock. The server refuses
+    // every tool request meanwhile, so nothing half-done is lost.
+    var relocked = false;
+    function showRelocked() {
+      var line = q(root, "admin-line");
+      var stages = root.querySelector(".vt-stages");
+      if (stages) stages.hidden = true;
+      relocked = true;
+      if (!line) return;
+      line.textContent = "";
+      var words = document.createElement("span");
+      words.textContent = LINE_ADMIN_OFF + " ";
+      line.appendChild(words);
+      if (adminSession()) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "btn btn-mini";
+        btn.setAttribute("data-vt", "admin-unlock");
+        btn.textContent = "Unlock admin";
+        btn.addEventListener("click", function () { adminSession().promptUnlock(); });
+        line.appendChild(btn);
+      }
+      line.hidden = false;
+    }
+
+    // showUnlocked(): admin mode is back; the tools reappear and the current
+    // pane loads again from the server.
+    function showUnlocked() {
+      if (!relocked) return;
+      relocked = false;
+      var stages = root.querySelector(".vt-stages");
+      if (stages) stages.hidden = false;
+      showAdminLine("");
+      state.loaded = {};
+      showTool(readStore(LS_TAB) || TOOLS[0]);
+    }
+
+    if (adminSession()) {
+      var stopWatching = adminSession().onChange(function (change) {
+        if (!document.body.contains(root)) { stopWatching(); return; }
+        if (!change.unlocked) showRelocked();
+        else if (relocked) showUnlocked();
+      });
     }
 
     function fail(resEl, res, fallback) {

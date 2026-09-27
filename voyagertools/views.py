@@ -39,7 +39,7 @@ from functools import wraps
 from pathlib import Path
 
 import yaml
-from flask import Blueprint, jsonify, render_template, request, session
+from flask import Blueprint, g, jsonify, render_template, request, session
 
 from . import camera_tool, clean_manual_edit, clean_workbench, order_tool, rewind
 from . import paramsstore as ps
@@ -267,13 +267,18 @@ def _admin_json():
 
 
 def guarded(view):
-    """Route decorator: the module lock, then admin mode, then RequestError to JSON."""
+    """Route decorator: the module lock, then admin mode, then RequestError to JSON.
+
+    A passing admin check sets flask.g.admin_gated, so the host renews admin
+    mode when the request is a POST that succeeds (program C spec 4.7).
+    """
     @wraps(view)
     def wrapper(*args, **kwargs):
         if deps.is_locked():
             return _locked_json()
         if not deps.is_admin():
             return _admin_json()
+        g.admin_gated = True
         try:
             return view(*args, **kwargs)
         except RequestError as exc:

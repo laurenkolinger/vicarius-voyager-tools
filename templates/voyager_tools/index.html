@@ -23,6 +23,11 @@
   <link rel="stylesheet" href="{{ base }}/static/vicarius_workflow.css?v={{ v }}">
   <link rel="stylesheet" href="{{ base }}/static/vicarius_roles.css?v={{ v }}">
   <link rel="stylesheet" href="{{ base }}/static/voyager_tools.css?v={{ v }}" data-vt-css="1" />
+  {# Admin mode countdown and relock in every window (program C spec 5.1).
+     The desktop supplies admin_session_v and serves the script; a standalone
+     developer host has neither, so its page gets no countdown and relies on
+     the server refusal alone. #}
+  {% if admin_session_v %}<script src="/static/admin_session.js?v={{ admin_session_v }}"></script>{% endif %}
 </head>
 <body>
   <main class="page" aria-labelledby="vt-title">
