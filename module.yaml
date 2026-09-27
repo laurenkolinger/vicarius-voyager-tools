@@ -18,7 +18,7 @@ display_name: "Atlas control panel"
 tags: ["3D", "TCRMP"]
 hidden: false
 hidden_reason: ""
-version: "0.4.0"
+version: "0.5.0"
 description: "The restricted settings and tools of the atlas, the Voyager runs, the manual edit and the desktop: the processing order, the camera model per season, the manual edit settings and the Shelf copy setting, the Voyager run switches, the parameter defaults in voyagerparams, rewind and spot redo, clean workbench and clean manual edit run, the manual edit review queue, uploads and timelines, the space floors, the GPU ladder, module locks, module details, the desktop appearance, and the settings history."
 author: "Lauren Olinger"
 created: "2026-09-04"
@@ -54,8 +54,8 @@ notes: |
   voyagertools/views.py is the blueprint (page, fragment with ?tool=panel
   for the atlas, JSON API of the eight tools); static/vt_settings.js holds
   the settings, desktop and history panes, which call the desktop's own
-  /api/settings routes (vicarius_ui_os/settings_views.py); order_tool.py, clean_workbench.py, clean_manual_edit.py,
-  rewind.py and camera_tool.py hold the tool logic; scripts/rewind_chunk.py
+  /api/settings routes (vicarius_ui_os/settings_views.py); order_tool.py, clean_workbench.py,
+  clean_voyager2_stage.py, clean_manual_edit.py, rewind.py, rewind_voyager2.py and camera_tool.py hold the tool logic; scripts/rewind_chunk.py
   runs under metashape -r to drop a chunk (with --fake for tests).
   voyagertools/paramsstore.py is the only reader and writer of the
   voyagerparams checkout (vicarius/modules/voyagerparams/github_repo/): it

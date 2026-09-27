@@ -9,8 +9,10 @@ Purpose: The web layer of the Atlas control panel (module voyager_tools;
          (the plain window, ?tool=panel for the atlas's Control panel
          tab, or ?tool=review for one transect's review content), and the
          JSON API of the eight tools: the processing order,
-         clean workbench, clean manual edit run, rewind, spot redo, the
-         prompts doc, the parameter defaults and the camera model table. The
+         clean workbench (the Voyager 1 Workbench with the other stages
+         excluded, and the Voyager 2 stage), clean manual edit run, rewind
+         and spot redo (Voyager 1, and Voyager 2 per transect), the prompts
+         doc, the parameter defaults and the camera model table. The
          Timelines and Review queue routes and the review fragment's payload
          live in manual_edit_views.py on the same blueprint; the Uploads pane reads and starts uploads through the
          manual edit module's own /manual-edit/api routes. The
@@ -52,7 +54,8 @@ from pathlib import Path
 import yaml
 from flask import Blueprint, current_app, g, jsonify, render_template, request, session
 
-from . import camera_tool, clean_manual_edit, clean_workbench, order_tool, rewind
+from . import camera_tool, clean_manual_edit, clean_voyager2_stage, clean_workbench, order_tool, rewind
+from . import rewind_voyager2
 from . import paramsstore as ps
 
 # --- constants ---------------------------------------------------------------
@@ -62,7 +65,7 @@ URL_PREFIX = "/voyager-tools"
 MODULE_SLUG = "voyager_tools"
 DISPLAY_NAME = "Atlas control panel"
 UI_STYLE = "voyager_tools"
-ASSET_VERSION = "20260927j"
+ASSET_VERSION = "20260927k"
 ROOT_SECTION_PREFIX = '<section class="voyager-tools"'
 STATIC_JS = "voyager_tools.js"
 STATIC_SETTINGS_JS = "vt_settings.js"  # the settings and desktop panes (program C spec 5.3)
@@ -135,6 +138,17 @@ HTTP_NOT_FOUND = 404
 HTTP_CONFLICT = 409
 HTTP_LOCKED = 423
 HTTP_SERVER_ERROR = 500
+# The excluded roots of the Workbench walk (program D Amendment 1, A1.1):
+# every stage driver.space names except the Voyager 1 Workbench, the edit
+# benches, and the in-flight transfer ledger, labelled for the page.
+LEDGER_LABEL = "transfer ledger"
+EDIT_BENCH_SETTING = "edit_bench_default"
+JOB_BENCH_KEY = "edit_bench"
+REWIND_TARGETS = rewind.TARGETS + (rewind_voyager2.TARGET_BEFORE_STEP2,)
+REWIND_TARGET_WORDS = dict(rewind.TARGET_WORDS, **{rewind_voyager2.TARGET_BEFORE_STEP2: rewind_voyager2.TARGET_WORDS})
+PHASE_VOYAGER1, PHASE_VOYAGER2 = "voyager1", "voyager2"
+SPOT_REDO_PHASES = (PHASE_VOYAGER1, PHASE_VOYAGER2)
+CONFIRM_VIGIL_KEY = "confirm_vigil"
 
 voyager_tools_bp = Blueprint(BLUEPRINT_NAME, __name__, url_prefix=URL_PREFIX,
                              template_folder=str(TEMPLATES_DIR), static_folder=str(STATIC_DIR),
@@ -291,6 +305,67 @@ def _remote_snapshot_default(path: str) -> dict:
     return remote.snapshot(ssh, path)
 
 
+def _stage_layout_default() -> dict:
+    """The roots the Workbench walk skips and the Voyager 2 stage, read from the driver configuration now.
+
+    Every stage driver.space.stage_roots names except the Voyager 1
+    Workbench, the fallback bench <workbench_root>/editbench, the manual edit
+    setting edit_bench_default, the bench of every unfinished manual edit
+    project, and nas.yaml inflight_dir. Fail closed: when any of them cannot
+    be read the scan and the delete are refused, never run without them.
+
+    Returns:
+        {"excluded": [(label, absolute path)], "voyager2_stage": path or None};
+        both empty when nas.yaml names no Workbench root.
+
+    Raises:
+        RequestError: 500 when the job store, its settings or the stage layout cannot be read.
+    """
+    cfg = deps.nas_config()
+    defaults = cfg.get("defaults") if isinstance(cfg.get("defaults"), Mapping) else {}
+    workbench = str(defaults.get("workbench_root") or "").strip()
+    if not workbench:
+        return {"excluded": [], "voyager2_stage": None}
+    try:
+        bench = str(deps.job_store().settings().get(EDIT_BENCH_SETTING) or "").strip() or None
+    except Exception as exc:  # noqa: BLE001  (the store's error classes all mean: fix the settings file)
+        raise RequestError(f"The manual edit settings cannot be read, so the edit bench is unknown: {exc}",
+                           HTTP_SERVER_ERROR)
+    job_benches = [str(job.get(JOB_BENCH_KEY) or "").strip() for job in _unfinished_jobs()]
+    space = _driver_module("space")
+    try:
+        roots = space.stage_roots(cfg, bench)
+    except (TypeError, ValueError) as exc:
+        raise RequestError(f"The Workbench scan is refused because the stage folders cannot be read from "
+                           f"nas.yaml: {exc}", HTTP_SERVER_ERROR)
+    excluded = [(label, path) for label, path in roots.items() if label != space.WORKBENCH]
+    benches = [os.path.join(roots[space.WORKBENCH], space.EDIT_BENCH_SUBFOLDER)] + job_benches
+    excluded += [(space.EDIT_BENCH, b) for b in benches if os.path.isabs(b) and (space.EDIT_BENCH, b) not in excluded]
+    ledger = cfg.get("inflight_dir")
+    if isinstance(ledger, str) and os.path.isabs(ledger):
+        excluded.append((LEDGER_LABEL, ledger))
+    return {"excluded": excluded, "voyager2_stage": roots.get(space.VOYAGER2_STAGE)}
+
+
+def _shelf_host_root() -> tuple[str, str]:
+    """(NAS host, defaults.shelf_root) from nas.yaml; RequestError 500 when the Shelf root is missing."""
+    cfg = deps.nas_config()
+    defaults = cfg.get("defaults") if isinstance(cfg.get("defaults"), Mapping) else {}
+    root = str(defaults.get("shelf_root") or "").strip()
+    if not root.startswith("/"):
+        raise RequestError("nas.yaml names no defaults.shelf_root, so no Shelf folder can be renamed.",
+                           HTTP_SERVER_ERROR)
+    return str(cfg.get("host") or "").strip(), root
+
+
+def _archive_shelf_output_default(dest: str) -> str | None:
+    """Rename a Shelf output folder to <dest>_voy2_archive_<stamp> through the driver's own archive step."""
+    cfg = deps.nas_config()
+    remote = _driver_module("remote")
+    ssh = remote.SSH(cfg.get("host"), cfg.get("user"), cfg.get("key"))
+    return _driver_module("phase2").archive_output(ssh, dest, _shelf_host_root()[1])
+
+
 def _site_name_default(code) -> str:
     """Full site name for a site code from SITE_CODES_CSV; "" when unknown or the table is missing."""
     wanted = code.strip().upper() if isinstance(code, str) else ""
@@ -320,7 +395,10 @@ class Deps:
     params_store() -> ParamsStore; nas_config() -> dict; workbench_roots()
     -> [paths]; local_snapshot(path) -> snapshot; remote_snapshot(path) ->
     snapshot; rmtree(path); append_processing_log(row); run_chunk(psx,
-    label, out_dir) -> result document; site_name(code) -> str;
+    label, out_dir) -> result document; stage_layout() -> {"excluded",
+    "voyager2_stage"}, the roots the Workbench walk skips and the Voyager 2
+    stage; archive_shelf_output(dest) -> the renamed Shelf folder or None;
+    site_name(code) -> str;
     prompts_doc() -> Path; now_iso() -> str; record_setting(phase, key,
     old_version, new_version, by, reason) -> the recorded time, the
     settings history line of a parameter save (the desktop wires
@@ -345,6 +423,8 @@ class Deps:
         self.rmtree: Callable = shutil.rmtree
         self.append_processing_log: Callable = lambda row: clean_workbench.append_processing_log(row, str(PROCESSING_LOG))
         self.run_chunk: Callable = rewind.run_chunk_script
+        self.stage_layout: Callable[[], dict] = _stage_layout_default
+        self.archive_shelf_output: Callable[[str], str | None] = _archive_shelf_output_default
         self.site_name: Callable[[str], str] = _site_name_default
         self.prompts_doc: Callable[[], Path] = lambda: PROMPTS_DOC
         self.now_iso: Callable[[], str] = lambda: datetime.now(AST).isoformat(timespec="seconds")
@@ -739,9 +819,56 @@ def api_workbench():
     registry = deps.registry()
     roots = deps.workbench_roots()
     if not roots:
-        return jsonify({"roots": [], "folders": [], "problems": ["No Workbench root is configured in the Carousel's nas.yaml."]})
-    return jsonify(clean_workbench.plan(roots, registry.load(), deps.local_snapshot, deps.remote_snapshot,
-                                        registry.run_is_live))
+        return jsonify({"roots": [], "folders": [], "excluded": [], "voyager2_stage": None,
+                        "problems": ["No Workbench root is configured in the Carousel's nas.yaml."]})
+    layout = deps.stage_layout()
+    rows = registry.load()
+    result = clean_workbench.plan(roots, rows, deps.local_snapshot, deps.remote_snapshot, registry.run_is_live,
+                                  exclude_roots=layout["excluded"])
+    stage = layout.get("voyager2_stage")
+    result["voyager2_stage"] = (clean_voyager2_stage.plan(stage, rows, registry.fact_sections, deps.local_snapshot,
+                                                          deps.remote_snapshot, registry.run_is_live)
+                                if stage else None)
+    return jsonify(result)
+
+
+def _inside_real(path: str, root: str | None) -> bool:
+    """True when the real path of `path` lies strictly inside the real path of `root`."""
+    if not root:
+        return False
+    real, base = os.path.realpath(path), os.path.realpath(root)
+    return real != base and real.startswith(base.rstrip("/") + "/")
+
+
+def _delete_stage_copy(path: str, stage: str, initials: str, registry) -> dict:
+    """Delete one Voyager 2 stage copy after its plan is redone: {deleted, bytes, kind, log_row, problems}."""
+    try:
+        real, kind = clean_voyager2_stage.anchored(path, stage)
+    except (TypeError, ValueError) as exc:
+        raise RequestError(str(exc))
+    item = {"path": real, "name": os.path.basename(real), "kind": kind, "test": False}
+    folder = clean_voyager2_stage.plan_item(item, registry.load(), registry.fact_sections, deps.local_snapshot,
+                                            deps.remote_snapshot, registry.run_is_live)
+    if not folder["deletable"]:
+        raise RequestError(f"{real} is not deletable: {folder['detail']}", HTTP_CONFLICT, {"folder": folder})
+    try:
+        result = clean_voyager2_stage.delete_folder(real, stage, registry.run_is_live, deps.rmtree)
+    except ValueError as exc:
+        raise RequestError(str(exc), HTTP_CONFLICT if RUNNING_PHRASE in str(exc) else HTTP_BAD_REQUEST)
+    except OSError as exc:
+        raise RequestError(str(exc), HTTP_SERVER_ERROR)
+    row = clean_voyager2_stage.processing_log_row(result["deleted"], folder["shelf_path"], folder["readable_ids"],
+                                                  initials, result["bytes"], kind, deps.now_iso)
+    return dict(result, log_row=row, problems=_append_log(row))
+
+
+def _append_log(row: Mapping) -> list[str]:
+    """Append one processing_log row; [] on success, else the failure as one sentence (the action already ran)."""
+    try:
+        deps.append_processing_log(row)
+    except OSError as exc:
+        return [str(exc)]
+    return []
 
 
 @voyager_tools_bp.route("/api/workbench/delete", methods=["POST"])
@@ -754,8 +881,13 @@ def api_workbench_delete():
     path = _text(body, "path", required=True, max_chars=4096)
     registry = deps.registry()
     roots = deps.workbench_roots()
+    layout = deps.stage_layout()
+    stage = layout.get("voyager2_stage")
+    if os.path.isabs(path) and _inside_real(path, stage):
+        result = _delete_stage_copy(path, stage, initials, registry)
+        return jsonify({"ok": True, **result})
     try:
-        real = clean_workbench.anchored(path, roots)
+        real = clean_workbench.anchored(path, roots, exclude_roots=layout["excluded"])
     except (TypeError, ValueError) as exc:
         raise RequestError(str(exc))
     folder = clean_workbench.plan_folder(real, registry.load(), deps.local_snapshot, deps.remote_snapshot,
@@ -763,20 +895,16 @@ def api_workbench_delete():
     if not folder["deletable"]:
         raise RequestError(f"{real} is not deletable: {folder['detail']}", HTTP_CONFLICT, {"folder": folder})
     try:
-        result = clean_workbench.delete_folder(real, roots, registry.run_is_live, deps.rmtree)
+        result = clean_workbench.delete_folder(real, roots, registry.run_is_live, deps.rmtree,
+                                               exclude_roots=layout["excluded"])
     except ValueError as exc:
         raise RequestError(str(exc), HTTP_CONFLICT if RUNNING_PHRASE in str(exc) else HTTP_BAD_REQUEST)
     except OSError as exc:
         raise RequestError(str(exc), HTTP_SERVER_ERROR)
     row = clean_workbench.processing_log_row(result["deleted"], folder["shelf_path"], folder["readable_ids"],
                                              initials, result["bytes"], deps.now_iso)
-    problems = []
-    try:
-        deps.append_processing_log(row)
-    except OSError as exc:
-        problems.append(str(exc))
     return jsonify({"ok": True, "deleted": result["deleted"], "bytes": result["bytes"], "log_row": row,
-                    "problems": problems})
+                    "problems": _append_log(row)})
 
 
 # --- tool 3: clean manual edit run ----------------------------------------------------------
@@ -848,6 +976,7 @@ def _rewind_rows(registry, active_ids) -> list[dict]:
             "run_state": registry.run_state(row),
             "processing_location": location, "local": rewind.is_local_folder(location),
             "in_job": row.get("readable_id") in active_ids, "psx_file": row.get("psx_file", ""),
+            "step2_status": row.get("step2_status", ""),
         })
     return out
 
@@ -858,15 +987,15 @@ def api_rewind_rows():
     """The rows the rewind and spot redo selects list."""
     active_ids, _jobs = _listed_job_ids()
     return jsonify({"rows": _rewind_rows(deps.registry(), set(active_ids)), "targets": [
-        {"value": t, "label": rewind.TARGET_WORDS[t]} for t in rewind.TARGETS]})
+        {"value": t, "label": REWIND_TARGET_WORDS[t]} for t in REWIND_TARGETS]})
 
 
 def _rewind_row(registry, body: Mapping) -> tuple[dict, str]:
     """The row named by the body and the validated target."""
     rid = _readable_id(body)
     target = str(body.get("target") or rewind.TARGET_BEFORE_STEP1)
-    if target not in rewind.TARGETS:
-        raise RequestError(f"target must be one of {', '.join(rewind.TARGETS)}.")
+    if target not in REWIND_TARGETS:
+        raise RequestError(f"target must be one of {', '.join(REWIND_TARGETS)}.")
     row = registry.get(rid)
     if row is None:
         raise RequestError(f"No registry row has the id {rid}.", HTTP_NOT_FOUND)
@@ -892,11 +1021,47 @@ def api_rewind_plan():
     body = _json_body()
     registry = deps.registry()
     row, target = _rewind_row(registry, body)
+    if target == rewind_voyager2.TARGET_BEFORE_STEP2:
+        return jsonify({"ok": True, "plan": _voyager2_call(rewind_voyager2.plan_or_refuse, row["readable_id"],
+                                                           registry, **_shelf_kwargs())})
+    return jsonify({"ok": True, "plan": _voyager1_plan(registry, row, target)})
+
+
+def _voyager1_plan(registry, row: dict, target: str) -> dict:
+    """The Voyager 1 rewind dry run after its refusals (409 when there is nothing to rewind)."""
     _refuse_rewind(registry, row, target, _job_row_ids(_unfinished_jobs()))
     the_plan = rewind.plan(row, target, registry_mod=registry)
     if the_plan["empty"]:
         raise RequestError(f"{row['readable_id']} has nothing to rewind {the_plan['target_words']}.", HTTP_CONFLICT)
-    return jsonify({"ok": True, "plan": the_plan})
+    return the_plan
+
+
+def _shelf_kwargs() -> dict:
+    """The shelf_host and shelf_root keywords of the Voyager 2 rewind, from nas.yaml."""
+    host, root = _shelf_host_root()
+    return {"shelf_host": host, "shelf_root": root}
+
+
+def _voyager2_call(fn: Callable, *args, **kwargs):
+    """Call a rewind_voyager2 function; a refusal is a 409 and a part-way stop a 500, each in its own words."""
+    try:
+        return fn(*args, **kwargs)
+    except rewind_voyager2.Voyager2Refused as exc:
+        raise RequestError(str(exc), HTTP_CONFLICT)
+    except OSError as exc:
+        raise RequestError(str(exc), HTTP_SERVER_ERROR)
+
+
+def _apply_voyager2_rewind(body: Mapping, registry, initials: str) -> dict:
+    """The rewind before Voyager 2, then its processing_log row when a Shelf folder was renamed."""
+    manifest = _voyager2_call(rewind_voyager2.apply, _readable_id(body), registry, _actor(initials), initials,
+                              deps.archive_shelf_output, confirm_vigil=body.get(CONFIRM_VIGIL_KEY) is True,
+                              **_shelf_kwargs())
+    manifest["problems"] = []
+    if manifest["archived_to"]:
+        row = rewind_voyager2.processing_log_row(manifest, _shelf_host_root()[0], initials, deps.now_iso)
+        manifest["problems"] = _append_log(row)
+    return manifest
 
 
 def _apply_rewind(body: Mapping, spot: bool) -> dict:
@@ -907,6 +1072,8 @@ def _apply_rewind(body: Mapping, spot: bool) -> dict:
     if spot:
         body = dict(body, target=rewind.TARGET_BEFORE_STEP1)
     row, target = _rewind_row(registry, body)
+    if target == rewind_voyager2.TARGET_BEFORE_STEP2:
+        return _apply_voyager2_rewind(body, registry, initials)
     active_ids = _job_row_ids(_unfinished_jobs())
     _refuse_rewind(registry, row, target, active_ids)
     try:
@@ -927,11 +1094,40 @@ def api_rewind_apply():
     return jsonify({"ok": True, "manifest": _apply_rewind(_json_body(), spot=False)})
 
 
+def _spot_phase(body: Mapping) -> str:
+    """The pipeline a spot redo names: voyager1 (the default) or voyager2."""
+    phase = str(body.get("phase") or PHASE_VOYAGER1)
+    if phase not in SPOT_REDO_PHASES:
+        raise RequestError(f"phase must be one of {', '.join(SPOT_REDO_PHASES)}.")
+    return phase
+
+
+@voyager_tools_bp.route("/api/spot-redo/plan", methods=["POST"])
+@guarded
+def api_spot_redo_plan():
+    """Spot redo dry run: {readable_id, phase} -> the rewind plan (voyager1) or the redo request plan (voyager2)."""
+    body = _json_body()
+    phase = _spot_phase(body)
+    registry = deps.registry()
+    row, _target = _rewind_row(registry, dict(body, target=rewind.TARGET_BEFORE_STEP1))
+    if phase == PHASE_VOYAGER2:
+        return jsonify({"ok": True, "plan": _voyager2_call(rewind_voyager2.spot_redo_plan, row["readable_id"], registry)})
+    return jsonify({"ok": True, "plan": _voyager1_plan(registry, row, rewind.TARGET_BEFORE_STEP1)})
+
+
 @voyager_tools_bp.route("/api/spot-redo", methods=["POST"])
 @guarded
 def api_spot_redo():
-    """Spot redo: {readable_id, initials, confirm: true} -> the manifest with the spot_redo fact."""
-    return jsonify({"ok": True, "manifest": _apply_rewind(_json_body(), spot=True)})
+    """Spot redo: {readable_id, phase, initials, confirm: true} -> the manifest (voyager1) or the redo request (voyager2)."""
+    body = _json_body()
+    if _spot_phase(body) == PHASE_VOYAGER1:
+        return jsonify({"ok": True, "manifest": _apply_rewind(body, spot=True)})
+    _confirmed(body)
+    initials = _initials(body)
+    registry = deps.registry()
+    row, _target = _rewind_row(registry, dict(body, target=rewind.TARGET_BEFORE_STEP1))
+    return jsonify({"ok": True, "manifest": _voyager2_call(rewind_voyager2.spot_redo, row["readable_id"], registry,
+                                                           _actor(initials), initials, now_iso=deps.now_iso)})
 
 
 # --- tool 6: the prompts doc -------------------------------------------------------------------

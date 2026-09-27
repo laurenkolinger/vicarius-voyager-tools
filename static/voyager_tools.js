@@ -160,13 +160,15 @@
     return name ? '<span class="vt-site">' + esc(name) + "</span> " + idChip(code) : idChip(code);
   }
 
-  // roleClass: the Workbench comparison status on the eight-role vocabulary
-  // of docs/superpowers/specs/2026-09-02-matrix-window-design.md section 2.
+  // roleClass: the Workbench and Voyager 2 stage status on the eight-role
+  // vocabulary of docs/superpowers/specs/2026-09-02-matrix-window-design.md
+  // section 2 (process state family: a verified deposit is "verified").
   function roleClass(status) {
     if (status === "identical") return "role-person";
-    if (status === "processing right now") return "role-in-progress";
+    if (status === "deposited and verified") return "role-verified";
+    if (status === "processing right now" || status === "reserved by a Voyager 2 turn" || status === "test run copy") return "role-in-progress";
     if (status === "differs" || status === "error") return "role-failed";
-    return "role-attention"; // "no registry row", "not on the Shelf"
+    return "role-attention"; // "no registry row", "not on the Shelf", "not deposited yet"
   }
 
   // stampWords: "2026-09-04T07:22:00-04:00" as "2026-09-04 07:22 AST" for a row.
@@ -814,53 +816,74 @@
     /* 2. clean workbench                                                    */
     /* ==================================================================== */
     var wbBody = q(root, "wb-body");
+    var wbV2Body = q(root, "wb-v2-body");
     var wbResult = q(root, "wb-result");
+    var DELETE_TIP = "Delete this local copy after the confirmation. VICARIUS checks it again, removes the folder from inside its root only, and writes one processing_log row.";
 
     function loadWorkbench() {
       var btn = q(root, "wb-scan");
       busy(btn, true);
       wbBody.innerHTML = emptyRow("Scanning the Workbench and asking the Shelf for the listing of each folder...");
+      wbV2Body.innerHTML = "";
       return api("/api/workbench").then(function (res) {
         busy(btn, false);
-        if (!res.ok) { fail(wbResult, res); wbBody.innerHTML = ""; return; }
+        if (!res.ok) { fail(wbResult, res); wbBody.innerHTML = ""; wbV2Body.innerHTML = ""; return; }
         renderWorkbench(res.data);
       });
     }
 
+    // folderRow: one copy with its check, its state and, when it may go, Delete;
+    // base, when given, is the root the shown name is made relative to.
+    function folderRow(f, base) {
+      var expander = "";
+      if (f.mismatches && f.mismatches.length) {
+        expander = ' <details class="src"><summary>' + f.mismatches.length + " difference" + (f.mismatches.length === 1 ? "" : "s") + "</summary><ul>" +
+          f.mismatches.slice(0, 20).map(function (m) { return "<li>" + esc(m) + "</li>"; }).join("") + "</ul></details>";
+      }
+      var meta = (f.kind ? '<span class="count">' + esc(f.kind) + "</span> " : "") +
+        (f.files ? '<span class="count">' + f.files + " files, " + gb(f.bytes) + "</span> " : "") +
+        (f.readable_ids.length ? f.readable_ids.map(idChip).join(" ") : '<span class="count">no registry row</span>') +
+        ' <span class="count">Shelf: ' + (f.shelf_path ? esc(f.shelf_path) : "none recorded") + "</span>";
+      return '<li class="row">' +
+        '<span class="row-name">' + esc(base && f.path.indexOf(base + "/") === 0 ? f.path.slice(base.length + 1) : f.path) + "</span>" +
+        (f.deletable
+          ? '<span class="row-act"><button type="button" class="btn btn-mini btn-danger" data-vt-delete="' + esc(f.path) + '" data-shelf="' + esc(f.shelf_path || "") + '" data-kind="' + esc(f.kind || "") + '" title="' + esc(DELETE_TIP) + '">Delete</button></span>'
+          : "<span class=\"row-act\"></span>") +
+        '<span class="row-state"><span class="chip ' + roleClass(f.status) + '" aria-hidden="true"></span> ' + esc(f.status) + (f.detail ? ": " + esc(f.detail) : "") + expander + "</span>" +
+        '<span class="row-meta">' + meta + "</span>" +
+        "</li>";
+    }
+
+    function problemsHtml(list) {
+      return (list || []).map(function (p) { return "<li>" + esc(p) + "</li>"; }).join("");
+    }
+
     function renderWorkbench(data) {
       q(root, "wb-roots").textContent = data.roots.length ? "Workbench roots: " + data.roots.join(", ") : "No Workbench root configured.";
-      q(root, "wb-problems").innerHTML = (data.problems || []).map(function (p) { return "<li>" + esc(p) + "</li>"; }).join("");
-      wbBody.innerHTML = data.folders.map(function (f) {
-        var expander = "";
-        if (f.mismatches && f.mismatches.length) {
-          expander = ' <details class="src"><summary>' + f.mismatches.length + " difference" + (f.mismatches.length === 1 ? "" : "s") + "</summary><ul>" +
-            f.mismatches.slice(0, 20).map(function (m) { return "<li>" + esc(m) + "</li>"; }).join("") + "</ul></details>";
-        }
-        var meta = (f.files ? '<span class="count">' + f.files + " files, " + gb(f.bytes) + "</span> " : "") +
-          (f.readable_ids.length ? f.readable_ids.map(idChip).join(" ") : '<span class="count">no registry row</span>') +
-          ' <span class="count">shelf: ' + (f.shelf_path ? esc(f.shelf_path) : "not on the Shelf") + "</span>";
-        return '<li class="row">' +
-          '<span class="row-name">' + esc(f.path) + "</span>" +
-          (f.deletable
-            ? '<span class="row-act"><button type="button" class="btn btn-mini btn-danger" data-vt-delete="' + esc(f.path) + '" data-shelf="' + esc(f.shelf_path || "") + '" title="Delete this local copy after the confirmation. VICARIUS checks the two copies again, removes the folder from inside the Workbench root only, and writes one processing_log row.">Delete</button></span>'
-            : "<span class=\"row-act\"></span>") +
-          '<span class="row-state"><span class="chip ' + roleClass(f.status) + '" aria-hidden="true"></span> ' + esc(f.status) + (f.detail ? ": " + esc(f.detail) : "") + expander + "</span>" +
-          '<span class="row-meta">' + meta + "</span>" +
-          "</li>";
-      }).join("") || emptyRow("No processing folder under the Workbench roots.");
+      q(root, "wb-excluded").textContent = (data.excluded || []).length
+        ? "Never scanned: " + data.excluded.map(function (e) { return e.label + " " + e.path; }).join(", ") + "." : "";
+      q(root, "wb-problems").innerHTML = problemsHtml(data.problems);
+      wbBody.innerHTML = data.folders.map(function (f) { return folderRow(f); }).join("") || emptyRow("No processing folder under the Workbench roots.");
+      var stage = data.voyager2_stage;
+      q(root, "wb-v2-root").textContent = stage ? "Voyager 2 stage: " + stage.root : "No Voyager 2 stage is configured.";
+      q(root, "wb-v2-problems").innerHTML = stage ? problemsHtml(stage.problems) : "";
+      wbV2Body.innerHTML = stage ? (stage.folders.map(function (f) { return folderRow(f, stage.root); }).join("") || emptyRow("No copy on the Voyager 2 stage.")) : "";
     }
 
     q(root, "wb-scan").addEventListener("click", loadWorkbench);
-    wbBody.addEventListener("click", function (e) {
+    function onDeleteClick(e) {
       var btn = e.target.closest("[data-vt-delete]");
       if (!btn) return;
       var who = initials(wbResult);
       if (!who) return;
       var path = btn.getAttribute("data-vt-delete");
       var shelf = btn.getAttribute("data-shelf") || "";
+      var working = btn.getAttribute("data-kind") === "working copy";
       confirmDialog({
-        title: "Delete this Workbench copy",
-        lines: ["Delete " + path + " from the Workbench.", "The Shelf copy at " + shelf + " matched it file for file by name and size; VICARIUS checks again before deleting and writes one processing_log row."],
+        title: "Delete this local copy",
+        lines: ["Delete " + path + ".",
+                working ? "Voyager 2 deposited and verified this transect's products on the Shelf" + (shelf ? " at " + shelf : "") + "; VICARIUS checks again before deleting and writes one processing_log row."
+                        : "The Shelf copy at " + shelf + " matched it file for file by name and size; VICARIUS checks again before deleting and writes one processing_log row."],
         okLabel: "Delete the local copy"
       }).then(function (ok) {
         if (!ok) return;
@@ -872,7 +895,9 @@
           loadWorkbench();
         });
       });
-    });
+    }
+    wbBody.addEventListener("click", onDeleteClick);
+    wbV2Body.addEventListener("click", onDeleteClick);
 
     /* ==================================================================== */
     /* 3. clean manual edit run                                              */
@@ -965,6 +990,7 @@
       var dryBtn = q(root, prefix + "-dry");
       var applyBtn = q(root, prefix + "-apply");
       var current = null;
+      var V2_TARGET = "before_step2";
 
       function target() {
         if (spot) return "before_step1";
@@ -972,80 +998,185 @@
         return checked ? checked.value : "before_step1";
       }
 
+      // phase: the pipeline the spot redo runs again in (the rewind has none).
+      function phase() {
+        var checked = root.querySelector('input[name="vt-sr-phase"]:checked');
+        return checked ? checked.value : "voyager1";
+      }
+
+      function isV2(plan) { return !!plan && (plan.target === V2_TARGET || (spot && phase() === "voyager2")); }
+
+      function plural(n, one, many) { return n + " " + (n === 1 ? one : many); }
+
       function load() {
         return api("/api/rewind/rows").then(function (res) {
           if (!res.ok) { fail(resultEl, res); return; }
           var rows = res.data.rows;
           select.innerHTML = rows.map(function (r) {
             var note = r.in_job ? " (in a manual edit project)" : r.manual_edit_under_way ? " (manual edit under way)" : (!r.local ? " (on the NAS)" : "") + (r.run_state === "running" ? " (running)" : "");
-            var label = r.readable_id + "  " + (r.site_name || r.site) + " " + r.transect + " " + r.year + (r.season_token === "_pbl" ? " spring" : " annual") + "  " + (r.step1_status || r.stage || "started") + note;
+            var step2 = r.step2_status ? ", step 2 " + r.step2_status : "";
+            var label = r.readable_id + "  " + (r.site_name || r.site) + " " + r.transect + " " + r.year + (r.season_token === "_pbl" ? " spring" : " annual") + "  " + (r.step1_status || r.stage || "started") + step2 + note;
             return '<option value="' + esc(r.readable_id) + '">' + esc(label) + "</option>";
           }).join("") || '<option value="">No row has been touched by Voyager 1 yet</option>';
-          current = null;
-          planEl.innerHTML = "";
-          applyBtn.disabled = true;
+          reset();
         });
       }
 
-      function renderPlan(plan) {
+      function reset() {
+        current = null;
+        planEl.innerHTML = "";
+        applyBtn.disabled = true;
+      }
+
+      function listHtml(items) {
+        return items.join("") || emptyRow("none");
+      }
+
+      function renderV1Plan(plan) {
         var moves = plan.moves.map(function (m) {
           return '<li class="row"><span class="row-name">' + esc(m.kind) + '</span><span class="row-meta">' + esc(m.from) + "</span></li>";
-        }).join("") || emptyRow("none");
+        });
         var cellKeys = Object.keys(plan.registry_resets);
         var cells = cellKeys.map(function (c) {
           return '<li class="row"><span class="row-name">' + esc(c) + '</span><span class="row-meta">' + esc(plan.registry_resets[c]) + "</span></li>";
-        }).join("") || emptyRow("none");
+        });
         var chunkLine = plan.chunk ? (plan.chunk.present ? "remove chunk " + esc(plan.readable_id) + " from " + esc(plan.chunk.psx) : "psx not on disk: " + esc(plan.chunk.psx)) : "no psx recorded";
-        var html = "<h3>" + esc(plan.readable_id) + " " + esc(plan.target_words) + "</h3>" +
+        return "<h3>" + esc(plan.readable_id) + " " + esc(plan.target_words) + "</h3>" +
           '<p class="count">Rewind folder: ' + esc(plan.rewind_dir) + "</p>" +
-          "<h3>Artifacts to move (" + plan.moves.length + ")</h3><ul class=\"rows\">" + moves + "</ul>" +
+          "<h3>Artifacts to move (" + plan.moves.length + ")</h3><ul class=\"rows\">" + listHtml(moves) + "</ul>" +
           "<h3>Chunk</h3><p class=\"count\">" + chunkLine + "</p>" +
-          "<h3>Registry cells to reset (" + cellKeys.length + ")</h3><ul class=\"rows\">" + cells + "</ul>" +
-          "<h3>status.csv cells</h3><p class=\"count\">" + esc(plan.status_resets.join(", ") || "none") + "</p>" +
-          (plan.warnings.length ? "<h3>Warnings</h3><ul class=\"rows\">" + plan.warnings.map(function (w) {
-            return '<li class="row"><span class="row-meta is-warn">' + esc(w) + "</span></li>";
-          }).join("") + "</ul>" : "");
-        planEl.innerHTML = html;
+          "<h3>Registry cells to reset (" + cellKeys.length + ")</h3><ul class=\"rows\">" + listHtml(cells) + "</ul>" +
+          "<h3>status.csv cells</h3><p class=\"count\">" + esc(plan.status_resets.join(", ") || "none") + "</p>";
+      }
+
+      function renderV2Rewind(plan) {
+        var rows = plan.rows.map(function (r) {
+          var cells = Object.keys(r.registry_resets);
+          return '<li class="row"><span class="row-name">' + idChip(r.readable_id) + '</span><span class="row-meta">' +
+            plural(cells.length, "registry cell", "registry cells") + " cleared (" + esc(cells.join(", ")) + "), " +
+            plural(r.facts_cleared.length, "Voyager 2 fact", "Voyager 2 facts") + " blanked" +
+            (r.console_log ? ", console log pointed into the renamed folder" : "") + "</span></li>";
+        });
+        var vigil = plan.vigil_references.map(function (v) {
+          return '<li class="row"><span class="row-meta is-warn">VIGIL holds ' + esc(v.readable_id) + " (" + esc(v.key) + " " + esc(v.value) + ")</span></li>";
+        });
+        return "<h3>" + esc(plan.transect) + " " + esc(plan.target_words) + "</h3>" +
+          '<p class="count">' + (plan.shelf_folder ? "Shelf output folder " + esc(plan.shelf_folder) + " gets _voy2_archive_ and the time of the rename added to its name; nothing is deleted."
+                                                  : "No Shelf output folder is recorded, so nothing on the Shelf changes.") + "</p>" +
+          "<h3>Timepoints to clear (" + plan.rows.length + ")</h3><ul class=\"rows\">" + listHtml(rows) + "</ul>" +
+          (vigil.length ? "<h3>VIGIL</h3><ul class=\"rows\">" + vigil.join("") + "</ul>" : "");
+      }
+
+      function renderV2Redo(plan) {
+        var rows = plan.rows.map(function (r) {
+          return '<li class="row"><span class="row-name">' + idChip(r.readable_id) + '</span><span class="row-meta">step 2 finished ' + esc(r.step2_finished || "at an unrecorded time") + "</span></li>";
+        });
+        return "<h3>" + esc(plan.transect) + " again in Voyager 2</h3>" +
+          '<p class="count">Nothing moves now; the next Voyager 2 turn rebuilds every product before it deposits a new output folder.</p>' +
+          "<h3>Timepoints to mark (" + plan.rows.length + ")</h3><ul class=\"rows\">" + listHtml(rows) + "</ul>";
+      }
+
+      function renderPlan(plan) {
+        var html = !isV2(plan) ? renderV1Plan(plan) : (spot ? renderV2Redo(plan) : renderV2Rewind(plan));
+        var warnings = plan.warnings || [];
+        planEl.innerHTML = html + (warnings.length ? "<h3>Warnings</h3><ul class=\"rows\">" + warnings.map(function (w) {
+          return '<li class="row"><span class="row-meta is-warn">' + esc(w) + "</span></li>";
+        }).join("") + "</ul>" : "");
+      }
+
+      function dryLine(plan) {
+        if (!isV2(plan)) {
+          return "Dry run: nothing changed. " + plural(plan.moves.length, "artifact", "artifacts") + " would move and " + Object.keys(plan.registry_resets).length + " registry cells would reset.";
+        }
+        if (spot) return "Dry run: nothing changed. " + plural(plan.rows.length, "timepoint", "timepoints") + " would be marked for another Voyager 2 run.";
+        return "Dry run: nothing changed. " + plural(plan.rows.length, "timepoint", "timepoints") + " would be cleared" + (plan.shelf_folder ? " and the Shelf output folder renamed." : ".");
+      }
+
+      function dryRequest(rid) {
+        if (spot) return api("/api/spot-redo/plan", { method: "POST", body: { readable_id: rid, phase: phase() } });
+        return api("/api/rewind/plan", { method: "POST", body: { readable_id: rid, target: target() } });
       }
 
       dryBtn.addEventListener("click", function () {
         var rid = select.value;
         if (!rid) { setResult(resultEl, "Choose a timepoint first.", "error"); return; }
         busy(dryBtn, true);
-        api("/api/rewind/plan", { method: "POST", body: { readable_id: rid, target: target() } }).then(function (res) {
+        dryRequest(rid).then(function (res) {
           busy(dryBtn, false);
-          if (!res.ok) { fail(resultEl, res); planEl.innerHTML = ""; applyBtn.disabled = true; return; }
+          if (!res.ok) { fail(resultEl, res); reset(); return; }
           current = res.data.plan;
           renderPlan(current);
-          setResult(resultEl, "Dry run: nothing changed. " + current.moves.length + " artifact" + (current.moves.length === 1 ? "" : "s") + " would move and " + Object.keys(current.registry_resets).length + " registry cells would reset.");
+          setResult(resultEl, dryLine(current));
           applyBtn.disabled = false;
         });
       });
 
+      function confirmSpec(plan) {
+        if (!isV2(plan)) {
+          var cells = Object.keys(plan.registry_resets).length;
+          return {
+            title: spot ? "Redo this timepoint" : "Apply the rewind",
+            lines: ["Rewind " + plan.readable_id + " " + plan.target_words + ": " + plural(plan.moves.length, "artifact", "artifacts") + " move into " + plan.rewind_dir + ", " +
+                    (plan.chunk && plan.chunk.present ? "its chunk leaves " + plan.chunk.psx + ", " : "") + cells + " registry cells reset.",
+                    spot ? "VICARIUS then records the spot_redo fact so Voyager 1 setup offers the timepoint again." : "Nothing is deleted; the moved files stay under _rewind."],
+            okLabel: spot ? "Redo this timepoint" : "Apply rewind"
+          };
+        }
+        if (spot) {
+          return {
+            title: "Run the transect again in Voyager 2",
+            lines: ["Mark " + plan.transect + " for another Voyager 2 run: " + plural(plan.rows.length, "timepoint gets", "timepoints get") + " a redo request.",
+                    "Nothing moves now; the next Voyager 2 turn rebuilds every product before it deposits a new output folder."],
+            okLabel: "Request the redo"
+          };
+        }
+        var lines = [(plan.shelf_folder ? "Rename " + plan.shelf_folder + " on the Shelf with _voy2_archive_ and the time of the rename, then clear " : "Clear ") +
+                     "the step 2 cells and Voyager 2 facts of " + plural(plan.rows.length, "timepoint", "timepoints") + " of " + plan.transect + "."];
+        if (plan.vigil_references.length) {
+          lines.push("VIGIL still holds its copies of " + plan.vigil_references.map(function (v) { return v.readable_id; }).join(", ") + " on the VIGIL stage; they show the products this rewind retires.");
+        }
+        return { title: "Rewind before Voyager 2", lines: lines, okLabel: plan.vigil_references.length ? "Rewind anyway" : "Apply rewind" };
+      }
+
+      function applyRequest(plan, who) {
+        if (spot) return api("/api/spot-redo", { method: "POST", body: { readable_id: plan.readable_id, phase: phase(), initials: who, confirm: true } });
+        var body = { readable_id: plan.readable_id, target: plan.target, initials: who, confirm: true };
+        if (isV2(plan) && plan.vigil_references.length) body.confirm_vigil = true;
+        return api("/api/rewind/apply", { method: "POST", body: body });
+      }
+
+      function doneLine(plan, m) {
+        if (!isV2(plan)) {
+          return "Rewound " + esc(m.readable_id) + " " + esc(m.target_words) + ": " + plural(m.moves.length, "artifact", "artifacts") + " moved into " + esc(m.rewind_dir) +
+            (m.chunk ? ", " + (m.chunk.removed || 0) + " chunk removed" : "") + ", " + Object.keys(m.registry_resets).length + " registry cells reset" + (m.spot_redo ? ", spot_redo fact recorded" : "") + ".";
+        }
+        if (spot) return "Redo requested for " + esc(m.transect) + ": " + plural(m.rows.length, "timepoint", "timepoints") + "; Voyager 2 setup offers the transect again.";
+        return "Rewound " + esc(m.transect) + " before Voyager 2: " + (m.archived_to ? "Shelf output folder renamed to " + esc(m.archived_to) : "no Shelf folder renamed") +
+          ", " + plural(m.rows.length, "timepoint", "timepoints") + " cleared." + ((m.problems || []).length ? " " + esc(m.problems.join(" ")) : "");
+      }
+
       applyBtn.addEventListener("click", function () {
         var who = initials(resultEl);
         if (!who || !current) return;
-        var cells = Object.keys(current.registry_resets).length;
-        confirmDialog({
-          title: spot ? "Redo this timepoint" : "Apply the rewind",
-          lines: [(spot ? "Rewind " : "Rewind ") + current.readable_id + " " + current.target_words + ": " + current.moves.length + " artifact" + (current.moves.length === 1 ? "" : "s") + " move into " + current.rewind_dir + ", " +
-                  (current.chunk && current.chunk.present ? "its chunk leaves " + current.chunk.psx + ", " : "") + cells + " registry cells reset.",
-                  spot ? "VICARIUS then records the spot_redo fact so Voyager 1 setup offers the timepoint again." : "Nothing is deleted; the moved files stay under _rewind."],
-          okLabel: spot ? "Redo this timepoint" : "Apply rewind"
-        }).then(function (ok) {
+        var plan = current;
+        confirmDialog(confirmSpec(plan)).then(function (ok) {
           if (!ok) return;
           busy(applyBtn, true);
-          var path = spot ? "/api/spot-redo" : "/api/rewind/apply";
-          api(path, { method: "POST", body: { readable_id: current.readable_id, target: current.target, initials: who, confirm: true } }).then(function (res) {
+          applyRequest(plan, who).then(function (res) {
             busy(applyBtn, false);
             if (!res.ok) { fail(resultEl, res); return; }
             var m = res.data.manifest;
-            setResult(resultEl, "Rewound " + esc(m.readable_id) + " " + esc(m.target_words) + ": " + m.moves.length + " artifact" + (m.moves.length === 1 ? "" : "s") + " moved into " + esc(m.rewind_dir) +
-              (m.chunk ? ", " + (m.chunk.removed || 0) + " chunk removed" : "") + ", " + Object.keys(m.registry_resets).length + " registry cells reset" + (m.spot_redo ? ", spot_redo fact recorded" : "") + ".");
+            setResult(resultEl, doneLine(plan, m), (m.problems || []).length ? "warn" : "");
             load();
           });
         });
       });
+
+      // A changed target or pipeline makes the shown dry run stale.
+      qa(root, 'input[name="vt-' + (spot ? "sr-phase" : "rw-target") + '"]').forEach(function (input) {
+        input.addEventListener("change", reset);
+      });
+      select.addEventListener("change", reset);
 
       return { load: load };
     }

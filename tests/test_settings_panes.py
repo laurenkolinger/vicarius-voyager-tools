@@ -787,8 +787,9 @@ class Seam(PanesCase):
     window.VoyagerTools.mount(q('.win-body'), {pane: 'shelf'});
     check(results, 'mounted', await waitFor(function () { return qa('[data-vt="shelf-fields"] input[type=radio]').length === 2; }));
     var shelf = qa('[data-vt="shelf-fields"] label.opt');
-    var rewind = qa('.voyager-tools input[name="vt-rw-target"]').map(function (i) { return i.closest('label'); });
-    check(results, 'shelf_and_rewind_opts', shelf.length === 2 && rewind.length === 2 && rewind.every(function (l) { return l && l.classList.contains('opt'); }),
+    // The rewind targets (before step 1, before step 0, before Voyager 2) and the spot redo pipelines.
+    var rewind = qa('.voyager-tools input[name="vt-rw-target"], .voyager-tools input[name="vt-sr-phase"]').map(function (i) { return i.closest('label'); });
+    check(results, 'shelf_and_rewind_opts', shelf.length === 2 && rewind.length === 5 && rewind.every(function (l) { return l && l.classList.contains('opt'); }),
           shelf.length + ' ' + rewind.length);
     shelf.concat(rewind).forEach(function (label, i) {
       var cs = getComputedStyle(label);
