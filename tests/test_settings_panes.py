@@ -47,8 +47,11 @@ PANEL_JS = CLONE / "static" / "voyager_tools.js"
 PANEL_CSS = CLONE / "static" / "voyager_tools.css"
 SHARED_CSS = CLONE / "static" / "vicarius_workflow.css"
 ROLES_CSS = CLONE / "static" / "vicarius_roles.css"
-# The desktop's global sheet, beside the module tree (vicarius_ui_os/static).
-DESKTOP_THEME_CSS = CLONE.parents[3] / "vicarius_ui_os" / "static" / "theme.css"
+# The desktop's global sheet and its loading splash, beside the module tree
+# (vicarius_ui_os/static).
+DESKTOP_STATIC = CLONE.parents[3] / "vicarius_ui_os" / "static"
+DESKTOP_THEME_CSS = DESKTOP_STATIC / "theme.css"
+DESKTOP_LOADING_JS = DESKTOP_STATIC / "loading.js"
 SETTINGS_JS = CLONE / "static" / "vt_settings.js"
 CHROME = "/usr/bin/google-chrome"
 SAVED_AT = "2026-09-26T21:54:25-04:00"
@@ -243,12 +246,14 @@ class PanesCase(unittest.TestCase):
 
     def run_steps(self, name: str, steps: str, routes: dict | None = None, settings_first: bool = False,
                   wrap: bool = False, initials: str | None = "lo", head_js: str = "",
-                  budget_ms: int = DEFAULT_BUDGET_MS, desktop_theme: bool = False) -> dict:
+                  budget_ms: int = DEFAULT_BUDGET_MS, desktop_theme: bool = False, head_html: str = "") -> dict:
         """Build the harness, run it in Chrome, and return the results the steps reported.
 
         initials=None leaves the initials field as the panel seeded it;
         head_js runs before the panel scripts (a fake desktop global, a
-        session value); budget_ms is Chrome's virtual time budget;
+        session value); head_html is markup placed after head_js and
+        before the panel (a desktop script and its elements);
+        budget_ms is Chrome's virtual time budget;
         desktop_theme links the desktop's global sheet first, as a desktop
         window has it. The panel's own sheets are always linked.
         """
@@ -263,7 +268,7 @@ class PanesCase(unittest.TestCase):
                 + steps +
                 "} catch (e) { results.__error = String(e && e.stack || e); }"
                 "results.__done = 'yes'; pre.textContent = JSON.stringify(results); })();")
-        head = f"<script>{head_js}</script>" if head_js else ""
+        head = (f"<script>{head_js}</script>" if head_js else "") + head_html
         sheets = ([DESKTOP_THEME_CSS] if desktop_theme else []) + [SHARED_CSS, ROLES_CSS]
         links = "".join(f'<link rel="stylesheet" href="file://{path}">' for path in sheets)
         links += f'<link rel="stylesheet" data-vt-css="1" href="file://{PANEL_CSS}">'
@@ -416,6 +421,26 @@ class ManualEditPane(PanesCase):
         check(results, 'seeded', q('#vt-initials').value === 'JD', q('#vt-initials').value);
         """
         self.run_steps("me_session_initials", steps, initials=None, head_js=head)
+
+    def test_the_loading_failsafe_leaves_the_initials_empty(self):
+        if not DESKTOP_LOADING_JS.exists():
+            self.skipTest("the desktop's loading.js is not beside this clone")
+        # The loading splash runs first, as it does on the desktop; its timers
+        # are held so the longest one (the failsafe that dissolves the splash
+        # when nobody submits) fires before the panel seeds its field.
+        head = ("window.__heldTimers = []; window.__realSetTimeout = window.setTimeout;"
+                "window.setTimeout = function (fn, ms) { window.__heldTimers.push({fn: fn, ms: ms || 0}); return 0; };"
+                "window.VICBOOT = { getInitials: function () { return 'LO'; } };")
+        fire = ("<script>window.setTimeout = window.__realSetTimeout;"
+                "var longest = window.__heldTimers.reduce(function (a, b) { return b.ms > a.ms ? b : a; });"
+                "window.__failsafeMs = longest.ms; longest.fn();</script>")
+        markup = (f'<div id="ld-overlay"></div><script src="file://{DESKTOP_LOADING_JS}"></script>' + fire)
+        steps = r"""
+        check(results, 'failsafe_ran', !q('#ld-overlay') && window.__failsafeMs >= 10000, String(window.__failsafeMs));
+        check(results, 'no_session_initials', sessionStorage.getItem('vic_initials') === null, sessionStorage.getItem('vic_initials'));
+        check(results, 'empty_field', q('#vt-initials').value === '', q('#vt-initials').value);
+        """
+        self.run_steps("loading_failsafe", steps, initials=None, head_js=head, head_html=markup)
 
     def test_drift_line_and_record_as_found(self):
         drifted = dict(MANUAL_EDIT, drift=[{"key": "scale_error_max_mm", "disk": "5.0", "history": "4.94"}])
@@ -751,6 +776,36 @@ class Seam(PanesCase):
               String(glyph.getBoundingClientRect().left - text.getBoundingClientRect().right));
         """
         self.run_steps("desktop_labels", steps, desktop_theme=True, wrap=True)
+
+    OPT_ROW_STEPS = r"""
+    window.VoyagerTools.mount(q('.win-body'), {pane: 'shelf'});
+    check(results, 'mounted', await waitFor(function () { return qa('[data-vt="shelf-fields"] input[type=radio]').length === 2; }));
+    var shelf = qa('[data-vt="shelf-fields"] label.opt');
+    var rewind = qa('.voyager-tools input[name="vt-rw-target"]').map(function (i) { return i.closest('label'); });
+    check(results, 'shelf_and_rewind_opts', shelf.length === 2 && rewind.length === 2 && rewind.every(function (l) { return l && l.classList.contains('opt'); }),
+          shelf.length + ' ' + rewind.length);
+    shelf.concat(rewind).forEach(function (label, i) {
+      var cs = getComputedStyle(label);
+      // inline-flex computes to flex inside a flex parent (the option rows are one).
+      check(results, 'display_' + i, cs.display === 'inline-flex' || cs.display === 'flex', label.textContent + ' ' + cs.display);
+      check(results, 'align_' + i, cs.alignItems === 'center', label.textContent + ' ' + cs.alignItems);
+      check(results, 'gap_' + i, cs.columnGap === '7px', label.textContent + ' ' + cs.columnGap);
+      check(results, 'case_' + i, cs.textTransform === 'none', label.textContent + ' ' + cs.textTransform);
+    });
+    shelf.forEach(function (label, i) {
+      var box = label.getBoundingClientRect(), input = label.querySelector('input').getBoundingClientRect();
+      var off = Math.abs((input.top + input.height / 2) - (box.top + box.height / 2));
+      check(results, 'input_centred_' + i, off <= 1, label.textContent + ' off by ' + off);
+    });
+    """
+
+    def test_opt_labels_keep_the_shared_row_layout_on_the_standalone_page(self):
+        self.run_steps("opt_standalone", self.OPT_ROW_STEPS, wrap=True)
+
+    def test_opt_labels_keep_the_shared_row_layout_under_the_desktop_sheet(self):
+        if not DESKTOP_THEME_CSS.exists():
+            self.skipTest("the desktop's theme.css is not beside this clone")
+        self.run_steps("opt_desktop", self.OPT_ROW_STEPS, wrap=True, desktop_theme=True)
 
     def test_a_panel_removed_without_unmount_is_forgotten(self):
         steps = r"""

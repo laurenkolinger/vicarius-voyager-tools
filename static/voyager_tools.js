@@ -334,7 +334,9 @@
 
     /* -- initials --------------------------------------------------------- */
     // The field is seeded only from what a person typed: this panel's own
-    // key, then the desktop's session key. Nothing else fills it, so a save
+    // key, then the desktop's session key, which the loading page
+    // (vicarius_ui_os/static/loading.js) fills only with typed initials of
+    // two to four letters. Nothing else fills it, so a save
     // is never signed with initials nobody typed (every settings history
     // line and registry event carries them).
     var initialsEl = root.querySelector("#vt-initials");

@@ -25,18 +25,22 @@
 }
 .voyager-tools *, .voyager-tools *::before, .voyager-tools *::after { box-sizing: border-box; }
 /* The desktop's global sheet (vicarius_ui_os/static/theme.css) styles every
-   bare label as an uppercase pixel-font caption with a margin; inside the
-   panel a label reads as body text in the type of its row. Rules that give
-   a label its own look (.opt, .opt-field, the dialog, the order position)
-   are more specific and still apply. */
+   bare label as an uppercase pixel-font caption with a margin and display
+   block; inside the panel a label reads as body text in the type of its row.
+   The type reset below (specificity 0,1,1) touches no property that .opt
+   sets. The display reset sits in :where() so it weighs 0,1,0: it beats the
+   bare label rule of theme.css (0,0,1), it skips .opt, whose inline-flex row
+   comes from the shared sheet (vicarius_workflow.css, 0,1,0 when linked,
+   0,2,0 when this panel injects it scoped), and the panel's own label rules
+   (.opt-field, the dialog, the order position) outweigh it. */
 .voyager-tools label {
-  display: inline;
   margin: 0;
   text-transform: none;
   letter-spacing: normal;
   font: inherit;
   color: inherit;
 }
+.voyager-tools :where(label:not(.opt)) { display: inline; }
 .voyager-tools .vt-line { display: block; margin: 4px 0 8px; }
 .voyager-tools .vt-header-choices { margin-bottom: 4px; }
 .voyager-tools .vt-site { font-weight: 500; }
