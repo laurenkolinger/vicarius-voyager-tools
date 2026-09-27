@@ -38,6 +38,8 @@ MANUAL_EDIT_CLONE = os.path.join(VICARIUS_ROOT, "modules", "manual_edit", "githu
 for path in (REGISTRY_LIB_DIR, MANUAL_EDIT_CLONE):
     if path not in sys.path:
         sys.path.insert(0, path)
+sys.path.insert(0, str(HERE))
+from status_seed import seed_status  # noqa: E402
 
 from manualedit import jobstore  # noqa: E402
 from voyagertools import paramsstore as ps  # noqa: E402
@@ -430,7 +432,7 @@ class ManualEditRoutes(ToolsCase):
             str(self.bench), "LO", 100, 500)
         local.mkdir()
         (local / "x.psx").write_bytes(b"p")
-        self.registry.upsert(RID_DONE, {"manual_edit_status": "editing", "processing_location": str(local)}, "seed")
+        seed_status(self.registry, RID_DONE, "editing", processing_location=str(local))
         return job, local
 
     def cancel(self, **body):
@@ -449,7 +451,7 @@ class ManualEditRoutes(ToolsCase):
                              "shelf_location": f"{SHELF_PARENT}/{folder}", "local_path": str(self.bench / folder),
                              "psx_basename": "LBH_T2_2025_2025.psx"}])
         self.jobs.save_job(record)
-        self.registry.upsert(RID_LBH, {"manual_edit_status": "editing"}, "seed")
+        seed_status(self.registry, RID_LBH, "editing")
         jobs = self.jobs
 
         class ManyProjects(jobstore.JobStore):
@@ -639,7 +641,7 @@ class RewindRoutes(ToolsCase):
         self.assertFalse(rows[0]["manual_edit_under_way"])
         for status in ("editing", "review", "upload"):
             with self.subTest(status=status):
-                self.registry.upsert(RID_DONE, {"manual_edit_status": status}, "seed")
+                seed_status(self.registry, RID_DONE, status)
                 rows = self.client.get("/voyager-tools/api/rewind/rows").get_json()["rows"]
                 self.assertTrue(rows[0]["manual_edit_under_way"])
                 for route in ("/voyager-tools/api/rewind/plan", "/voyager-tools/api/rewind/apply",

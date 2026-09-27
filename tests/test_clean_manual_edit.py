@@ -33,6 +33,9 @@ for path in (REGISTRY_LIB_DIR, MANUAL_EDIT_CLONE):
 from manualedit import jobstore  # noqa: E402
 from voyagertools import clean_manual_edit as cme  # noqa: E402
 
+sys.path.insert(0, str(HERE))
+from status_seed import seed_status  # noqa: E402
+
 HOST = "146.226.147.140"
 SHELF_PARENT = "/volume6/Archive8_12TB/driver_deposits/run1"
 RID = "MRS_T1_2023ann"
@@ -163,10 +166,9 @@ class WithStores(unittest.TestCase):
         os.makedirs(self.bench)
         self.store = jobstore.JobStore(self.root)
         self.shelf = f"{HOST}:{SHELF_PARENT}/{FOLDER}"
-        self.registry.upsert(RID, {"site": "MRS", "transect": "T1", "year": "2023", "season_token": "ann",
-                                   "step1_status": "complete", "manual_edit_status": "editing",
-                                   "processing_location": os.path.join(self.bench, FOLDER),
-                                   "processing_folder": FOLDER}, "seed")
+        seed_status(self.registry, RID, "editing", site="MRS", transect="T1", year="2023", season_token="ann",
+                    step1_status="complete", processing_location=os.path.join(self.bench, FOLDER),
+                    processing_folder=FOLDER)
         self.job = self.store.create_job(
             [{"readable_id": RID, "site": "MRS", "transect": "T1", "processing_folder": FOLDER,
               "shelf_location": f"{SHELF_PARENT}/{FOLDER}", "psx_basename": "MRS_T1_2023_2023.psx"}],
@@ -271,8 +273,7 @@ class WithStores(unittest.TestCase):
         self.assertEqual(result["phase"], "cancelled")
 
     def test_restore_is_idempotent(self):
-        self.registry.upsert(RID, {"processing_location": f"{SHELF_PARENT}/{FOLDER}",
-                                   "manual_edit_status": "awaiting"}, "seed")
+        seed_status(self.registry, RID, "awaiting", processing_location=f"{SHELF_PARENT}/{FOLDER}")
         before = Path(self.root, "events.csv").read_text()
         cme.restore_registry(self.job, self.registry, "voyager_tools:LO")
         self.assertEqual(Path(self.root, "events.csv").read_text(), before)
@@ -329,7 +330,7 @@ class WithStores(unittest.TestCase):
                     self.assertFalse(result["location_restored"])
 
     def test_restore_keeps_a_done_stamp_it_does_not_own(self):
-        self.registry.upsert(RID, {"manual_edit_status": "done", "manual_edit_done": "2026-09-26 21:07:00"}, "seed")
+        seed_status(self.registry, RID, "done", "2026-09-26 21:07:00")
         cme.restore_registry(self.job, self.registry, "voyager_tools:LO")
         row = self.registry.get(RID)
         self.assertEqual((row["manual_edit_status"], row["manual_edit_done"]), ("done", "2026-09-26 21:07:00"))
