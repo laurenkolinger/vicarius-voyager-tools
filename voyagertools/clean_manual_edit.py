@@ -16,7 +16,8 @@ Inputs:  a manualedit.jobstore.JobStore, the registry library (its manual
 Outputs: a plain summary for the page and the cancel result; registry cells
          written through registry.upsert (one event per changed cell) under
          the actor voyager_tools:<initials>; the job record moved to
-         cancelled (which clears current.json).
+         cancelled (which rewrites current.json from the remaining active
+         jobs, or removes it when none is left).
 
 Refusals: a finished job; a transfer or checks step in flight; a transect
 the manual edit job record holds in a certified state (review, upload,
@@ -362,7 +363,8 @@ def cancel_and_prune(store, registry_mod, job_id: str, initials: str, reason: st
     pointing at a folder about to go); the prune of the edit bench copies
     when the job never reached pushing (a failure to remove one is reported,
     not raised, and the job is still cancelled); the cleanup record; the
-    transition to cancelled, which clears current.json.
+    transition to cancelled, which rewrites current.json from the remaining
+    active jobs, or removes it when none is left.
 
     Parameters:
         store: a manualedit.jobstore.JobStore.
