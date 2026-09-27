@@ -37,10 +37,13 @@ REAL_CHECKOUT = VICARIUS_ROOT / "modules" / "voyagerparams" / "github_repo"
 VOYAGER1_TEMPLATE = VICARIUS_ROOT / "modules" / "3D_phase_1" / "github_repo" / "analysis_params.yaml"
 # The parameters module 3D_phase2 reads; its src/params.py refuses any key not in this file.
 VOYAGER2_DEFAULTS = VICARIUS_ROOT / "modules" / "3D_phase2" / "github_repo" / "config" / "voyager2_defaults.yaml"
-# Spec D section 4.15 as amended by A1.4: removed and added keys of the voyager2 body.
-VOYAGER2_REMOVED = ("voyager2.grid.resolution_mm",)
+# Spec D section 4.15 as amended by A1.4: removed and added keys of the voyager2 body; module
+# 3D_phase2's ADR 0003 renames psx.keep_orthomosaic to psx.keep_ortho_and_dem and adds the
+# working estimate and the upload cap.
+VOYAGER2_REMOVED = ("voyager2.grid.resolution_mm", "voyager2.psx.keep_orthomosaic")
 VOYAGER2_ADDED = ("voyager2.orthomosaic.resolution_mm", "voyager2.dem.resolution_mm", "voyager2.psx.save",
-                  "voyager2.psx.keep_orthomosaic")
+                  "voyager2.psx.keep_ortho_and_dem", "voyager2.working_estimate_gb_per_timepoint",
+                  "voyager2.psx.upload_cap_gb")
 
 FIXED_NOW = "2026-09-04T01:00:00-04:00"
 

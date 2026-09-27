@@ -7,7 +7,9 @@
 # section 4.15 as amended by Amendment 1 A1.4: grid.resolution_mm removed;
 # orthomosaic.resolution_mm, dem.resolution_mm, psx.save and
 # psx.keep_orthomosaic added) as the module ships it: its ADR 0002 records the
-# compute block, and the keys the module does not read (dem.interpolation,
+# compute block, its ADR 0003 renames psx.keep_orthomosaic to
+# psx.keep_ortho_and_dem and adds working_estimate_gb_per_timepoint and
+# psx.upload_cap_gb, and the keys the module does not read (dem.interpolation,
 # orthomosaic.subdivide_task, the three work item sizes, orthomosaic.enable_gpu,
 # model_export.format) are left out, because a version file carrying them is
 # refused at launch. Types: integer, number, boolean, string, list. min and max
@@ -49,12 +51,22 @@ keys:
   - path: voyager2.output_estimate_gb_per_timepoint
     section: resources
     type: number
-    default: 60
+    default: 20
     min: 0
     min_exclusive: true
     unit: GB
     label: Output per timepoint
-    tooltip: Type the GB one timepoint's products and its share of the Voyager 2 project are expected to take. Voyager 2 multiplies it by the timepoints of the run and refuses to start when the disk lacks that room.
+    tooltip: Type the GB one timepoint's products and its share of the Voyager 2 project are expected to take. Voyager 2 adds it to the working estimate for every timepoint of the run and refuses to start when the disk lacks that room.
+
+  - path: voyager2.working_estimate_gb_per_timepoint
+    section: resources
+    type: number
+    default: 300
+    min: 0
+    min_exclusive: true
+    unit: GB
+    label: Working copy growth per timepoint
+    tooltip: Type the GB one timepoint's orthomosaic build adds to the working copy on the Voyager 2 stage. Voyager 2 asks for this room on top of the free disk to keep before each orthomosaic build, and for it with the output estimate for every timepoint before the run starts.
 
   - path: voyager2.compute.gpu_mask
     section: resources
@@ -204,9 +216,19 @@ keys:
     label: Save the Voyager 2 project
     tooltip: Tick this to save the Voyager 2 Metashape project into the psx folder of the output folder at the end of the run. Default on, so the products can be rebuilt or inspected later.
 
-  - path: voyager2.psx.keep_orthomosaic
+  - path: voyager2.psx.keep_ortho_and_dem
     section: outputs
     type: boolean
-    default: true
-    label: Keep orthomosaics in the project
-    tooltip: Tick this to keep the orthomosaic assets inside the saved Voyager 2 project. Untick to have Voyager 2 remove them before the save, which makes the project much smaller.
+    default: false
+    label: Keep orthomosaics and DEMs in the project
+    tooltip: Tick this to keep every orthomosaic and DEM asset inside the saved Voyager 2 project, which grows it from about 6.5 GB to about 939 GB for a four-timepoint transect. Voyager 2 exports the rasters as GeoTIFF files either way, so the default off keeps the project small.
+
+  - path: voyager2.psx.upload_cap_gb
+    section: outputs
+    type: number
+    default: 50
+    min: 0
+    min_exclusive: true
+    unit: GB
+    label: Project upload cap
+    tooltip: Type the largest saved Voyager 2 project in GB that a test deposit uploads to the NAS. The Voyager 2 test-run tool reports a larger project, and the driver's test deposit refuses it unless the person running it adds the override flag.
