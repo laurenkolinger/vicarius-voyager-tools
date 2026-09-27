@@ -6,8 +6,13 @@ Purpose: The clean workbench tool (program spec section 7, tool 2): find
          to the registry rows whose processing location is on the Shelf,
          compare the local copy to the Shelf copy by file name and size, and
          delete a local copy only when the two are identical, anchored inside
-         a Workbench root, with one processing_log row per deletion.
-Inputs:  the Workbench roots from the Carousel's nas.yaml, registry rows,
+         a Workbench root, with one processing_log row per deletion. The
+         walk, the anchor and the delete skip every excluded root (program
+         D Amendment 1, A1.1): the Edit bench, the Voyager 2 and VIGIL
+         stages and the in-flight transfer ledger, which sit inside the
+         Workbench by default and hold folders with Voyager 1 names.
+Inputs:  the Workbench roots from the Carousel's nas.yaml, the excluded
+         roots the caller reads from the same configuration, registry rows,
          a local snapshot function (driver.verify.local_snapshot shape) and a
          remote snapshot function (driver.remote.snapshot shape), a liveness
          probe (registry.run_is_live), an rmtree function.
@@ -56,6 +61,8 @@ PROCESSING_LOG_COLUMNS = ["timestamp", "module", "origin", "purpose", "status", 
 LOG_MODULE = "voyager_tools"
 LOG_ORIGIN = "USER"
 LOG_STATUS = "deleted"
+# The label an excluded root carries when the caller passes bare paths.
+EXCLUDED_LABEL = "an excluded folder"
 
 
 def split_location(location) -> tuple[str | None, str]:
@@ -79,35 +86,85 @@ def _require_roots(roots) -> list[str]:
     return out
 
 
+def normalise_excludes(exclude_roots) -> list[tuple[str, str]]:
+    """The excluded roots as [(label, absolute path)], validated.
+
+    Parameters:
+        exclude_roots: a mapping {label: absolute path}, or an iterable of
+            absolute paths (each labelled EXCLUDED_LABEL) or of (label,
+            path) pairs, the shape this function returns.
+
+    Raises:
+        TypeError: for a single string, a non-iterable or a non-string path.
+        ValueError: for a blank or relative path.
+    """
+    if isinstance(exclude_roots, (str, bytes)) or not isinstance(exclude_roots, (Mapping, Iterable)):
+        raise TypeError(f"excluded roots must be a mapping or a list of absolute paths, "
+                        f"got {type(exclude_roots).__name__}")
+    if isinstance(exclude_roots, Mapping):
+        pairs = list(exclude_roots.items())
+    else:
+        pairs = [item if isinstance(item, tuple) and len(item) == 2 else (EXCLUDED_LABEL, item) for item in exclude_roots]
+    out = []
+    for label, path in pairs:
+        if not isinstance(path, str):
+            raise TypeError(f"an excluded root must be a path string, got {type(path).__name__}")
+        if not path.strip() or not os.path.isabs(path):
+            raise ValueError(f"an excluded root must be an absolute path, got {path!r}")
+        out.append((str(label), os.path.normpath(path)))
+    return out
+
+
+def _inside(path: str, root: str) -> bool:
+    """True when `path` is `root` or lies under it (both already normalised)."""
+    return path == root or path.startswith(root.rstrip("/") + "/")
+
+
+def excluded_by(path: str, excludes: list[tuple[str, str]]) -> tuple[str, str] | None:
+    """The (label, root) of the first excluded root `path` lies in, by its written or its real path; None otherwise."""
+    written, real = os.path.normpath(path), os.path.realpath(path)
+    for label, root in excludes:
+        if _inside(written, root) or _inside(real, os.path.realpath(root)):
+            return label, root
+    return None
+
+
 def find_processing_folders(roots, listdir: Callable = os.listdir, isdir: Callable = os.path.isdir,
-                            islink: Callable = os.path.islink) -> dict:
+                            islink: Callable = os.path.islink, *, exclude_roots=()) -> dict:
     """Every processing folder under the Workbench roots, at most MAX_WALK_DEPTH levels down.
 
     A processing folder is a directory whose name matches PROCESSING_FOLDER_NAME;
-    the walk never enters one, skips hidden names and symlinked directories,
-    and stops after MAX_WALK_ENTRIES entries.
+    the walk never enters one, skips hidden names, symlinked directories and
+    every excluded root, and stops after MAX_WALK_ENTRIES entries.
 
     Parameters:
         roots: absolute Workbench roots (a missing root is reported, not raised).
         listdir, isdir, islink: injectable for tests.
+        exclude_roots: see normalise_excludes; a root inside one is reported and skipped.
 
     Returns:
         {"folders": [{"path", "name", "root"}] sorted by path, "problems": [sentences]}.
     """
     roots = _require_roots(roots)
+    excludes = normalise_excludes(exclude_roots)
     folders, problems = [], []
     budget = [MAX_WALK_ENTRIES]
     for root in roots:
         if not isdir(root):
             problems.append(f"Workbench root {root} does not exist or is not a directory.")
             continue
-        _walk(root, root, 0, folders, problems, budget, listdir, isdir, islink)
+        hit = excluded_by(root, excludes)
+        if hit:
+            problems.append(f"Workbench root {root} lies inside {hit[0]} {hit[1]}; it is not scanned.")
+            continue
+        _walk(root, root, 0, folders, problems, budget, (listdir, isdir, islink), excludes)
     folders.sort(key=lambda f: f["path"])
     return {"folders": folders, "problems": problems}
 
 
-def _walk(root, folder, depth, found, problems, budget, listdir, isdir, islink) -> None:
-    """One level of the bounded walk (see find_processing_folders)."""
+def _walk(root, folder, depth, found, problems, budget, fs, excludes) -> None:
+    """One level of the bounded walk (see find_processing_folders); fs is (listdir, isdir, islink)."""
+    listdir, isdir, islink = fs
     if depth > MAX_WALK_DEPTH or budget[0] <= 0:
         return
     try:
@@ -121,12 +178,12 @@ def _walk(root, folder, depth, found, problems, budget, listdir, isdir, islink) 
             problems.append(f"Stopped after {MAX_WALK_ENTRIES} entries under {root}; the tree is too large to scan.")
             return
         path = os.path.join(folder, name)
-        if name.startswith(".") or islink(path) or not isdir(path):
+        if name.startswith(".") or islink(path) or not isdir(path) or excluded_by(path, excludes):
             continue
         if PROCESSING_FOLDER_NAME.match(name):
             found.append({"path": path, "name": name, "root": root})
             continue
-        _walk(root, path, depth + 1, found, problems, budget, listdir, isdir, islink)
+        _walk(root, path, depth + 1, found, problems, budget, fs, excludes)
 
 
 def rows_for_folder(folder_path: str, rows) -> list[dict]:
@@ -244,26 +301,30 @@ def plan_folder(path: str, rows, local_snapshot_fn: Callable, remote_snapshot_fn
 
 
 def plan(roots, rows, local_snapshot_fn: Callable, remote_snapshot_fn: Callable, is_live_fn: Callable,
-         find_fn: Callable = find_processing_folders) -> dict:
-    """The whole table: one plan per processing folder under the Workbench roots.
+         find_fn: Callable = find_processing_folders, *, exclude_roots=()) -> dict:
+    """The whole table: one plan per processing folder under the Workbench roots, excluded roots skipped.
 
     Returns:
-        {"roots": [...], "folders": [plan_folder dicts], "problems": [sentences]}.
+        {"roots": [...], "folders": [plan_folder dicts], "problems": [sentences],
+         "excluded": [{"label", "path"}] (the roots the walk skipped)}.
     """
-    found = find_fn(roots)
+    excludes = normalise_excludes(exclude_roots)
+    found = find_fn(roots, exclude_roots=excludes)
     plans = [plan_folder(f["path"], rows, local_snapshot_fn, remote_snapshot_fn, is_live_fn)
              for f in found["folders"]]
-    return {"roots": _require_roots(roots), "folders": plans, "problems": found["problems"]}
+    return {"roots": _require_roots(roots), "folders": plans, "problems": found["problems"],
+            "excluded": [{"label": label, "path": path} for label, path in excludes]}
 
 
-def anchored(path, roots) -> str:
-    """The real path of a processing folder that sits inside one of the Workbench roots.
+def anchored(path, roots, *, exclude_roots=()) -> str:
+    """The real path of a processing folder that sits inside one of the Workbench roots and in no excluded root.
 
     Raises:
         TypeError: when path is not a string.
         ValueError: when the path is relative, is a root itself, sits outside
-            every root, does not end with the processing suffix, is a symlink,
-            or is not a directory (each names the reason).
+            every root, lies inside an excluded root, does not carry the
+            processing folder name, is a symlink, or is not a directory (each
+            names the reason).
     """
     if not isinstance(path, str):
         raise TypeError(f"path must be a string, got {type(path).__name__}")
@@ -271,6 +332,9 @@ def anchored(path, roots) -> str:
         raise ValueError(f"the folder to delete must be an absolute path, got {path!r}")
     if os.path.islink(path.rstrip("/")):
         raise ValueError(f"{path} is a symlink; only a real folder inside the Workbench can be deleted")
+    hit = excluded_by(path, normalise_excludes(exclude_roots))
+    if hit:
+        raise ValueError(f"{path} lies inside {hit[0]} {hit[1]}, which the Workbench cleaner never touches")
     real = os.path.realpath(path)
     real_roots = [os.path.realpath(root) for root in _require_roots(roots)]
     inside = [root for root in real_roots if real != root and real.startswith(root.rstrip("/") + "/")]
@@ -283,8 +347,9 @@ def anchored(path, roots) -> str:
     return real
 
 
-def delete_folder(path, roots, is_live_fn: Callable, rmtree_fn: Callable = shutil.rmtree) -> dict:
-    """Remove one processing folder from the Workbench, anchored and not live.
+def delete_folder(path, roots, is_live_fn: Callable, rmtree_fn: Callable = shutil.rmtree, *,
+                  exclude_roots=()) -> dict:
+    """Remove one processing folder from the Workbench, anchored, outside every excluded root and not live.
 
     Returns:
         {"deleted": real path, "bytes": size counted before the delete}.
@@ -293,7 +358,7 @@ def delete_folder(path, roots, is_live_fn: Callable, rmtree_fn: Callable = shuti
         ValueError: from anchored(), or when a process holds the folder's lock.
         OSError: when the removal fails (names the folder).
     """
-    real = anchored(path, roots)
+    real = anchored(path, roots, exclude_roots=exclude_roots)
     if is_live_fn({"processing_location": real}):
         raise ValueError(f"{real} is processing right now; deleting is blocked until the run stops.")
     size = folder_bytes(real)
@@ -358,7 +423,7 @@ def append_processing_log(row: Mapping, log_path: str) -> None:
 __all__ = [
     "PROCESSING_FOLDER_NAME", "LOCK_NAME", "MAX_WALK_DEPTH", "MAX_WALK_ENTRIES", "STATUS_IDENTICAL", "STATUS_DIFFERS",
     "STATUS_NO_ROW", "STATUS_NOT_SHELVED", "STATUS_LIVE", "STATUS_ERROR", "PROCESSING_LOG_COLUMNS",
-    "split_location", "find_processing_folders", "rows_for_folder", "shelf_path_for", "compare_snapshots",
+    "EXCLUDED_LABEL", "normalise_excludes", "excluded_by", "split_location", "find_processing_folders", "rows_for_folder", "shelf_path_for", "compare_snapshots",
     "plan_folder", "plan", "anchored", "delete_folder", "folder_bytes", "processing_log_row",
     "append_processing_log",
 ]

@@ -59,7 +59,13 @@ _Avoid_: freeze, lock (the module lock and the processing lock are different thi
 ## The Workbench and the edit bench
 
 **Workbench candidate**:
-A folder whose name ends in `_3dprocessing` found at most four levels under a Workbench root (`defaults.workbench_root` in the Carousel's `config/nas.yaml`). It is deletable only when its registry rows place the transect on the Shelf and the Shelf copy matches it file for file by name and size.
+A Voyager 1 processing folder (`{SITE}_{T#}_3D`) found at most four levels under a Workbench root (`defaults.workbench_root` in the driver's `config/nas.yaml`) and outside every excluded root. It is deletable only when its registry rows place the transect on the Shelf and the Shelf copy matches it file for file by name and size.
+
+**Excluded root**:
+A folder the Workbench walk never enters and the delete never touches although it sits inside the Workbench by default: the Edit bench (the manual edit setting, the fallback `<workbench_root>/editbench` and every unfinished project's bench), the Voyager 2 stage, the VIGIL stage and the transfer ledger (`inflight_dir`). Read from the configuration at every scan; a scan that cannot read them is refused.
+
+**Voyager 2 stage copy**:
+A working copy (`{SITE}_{T#}_3D`, the pulled processing folder Voyager 2 opened and saved) or an output folder (`{SITE}_{T#}_3doutput`) a Voyager 2 turn left under `defaults.voyager2_stage_root`. A working copy goes once its deposit verified and no turn reserves the transect; an output folder only when it matches its Shelf copy; a test run copy under `test_<YYYYMMDD-HHMMSS>/` is never offered.
 
 **Shelf comparison**:
 The name-and-size diff between a local snapshot (`driver.verify.local_snapshot`) and a remote snapshot (`driver.remote.snapshot`) of one processing folder, with the `.processing.lock` control file left out of both sides. Its outcome is one of identical, differs, no registry row, not on the Shelf, processing right now, or error.
@@ -79,8 +85,11 @@ _Avoid_: reset, rollback, undo
 **Chunk script**:
 `scripts/rewind_chunk.py`, run under `metashape -r` to remove the chunks labelled with the readable id from the project and save; `--fake` treats the psx path as a JSON stand-in so tests need no Metashape.
 
+**Rewind before Voyager 2**:
+Taking a whole transect back to before Voyager 2: its Shelf output folder is renamed to `<name>_voy2_archive_<YYYYMMDD-HHMMSS>` and every row that carries a Voyager 2 result loses its step 2 cells, output location cells and voyager2 facts through the registry writer, with a note. Nothing is deleted.
+
 **Spot redo**:
-A rewind before step 1 plus the voyager1 fact `spot_redo` on the row, so the Voyager 1 setup window offers the timepoint again and passes `--force` for it.
+For Voyager 1, a rewind before step 1 plus the voyager1 fact `spot_redo` on the row, so the Voyager 1 setup window offers the timepoint again and passes `--force` for it. For Voyager 2, the voyager2 fact `redo_requested` on every complete row of the transect, so the Voyager 2 setup window offers the transect again.
 _Avoid_: rerun, redo (alone)
 
 ## Parameters

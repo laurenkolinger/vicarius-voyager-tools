@@ -594,7 +594,7 @@ class RewindRoutes(ToolsCase):
         self.assertEqual([x["readable_id"] for x in rows], [RID_DONE])
         self.assertTrue(rows[0]["local"])
         self.assertEqual(rows[0]["site_name"], "Meri Shoal")
-        self.assertEqual([t["value"] for t in r.get_json()["targets"]], ["before_step1", "before_step0"])
+        self.assertEqual([t["value"] for t in r.get_json()["targets"]], ["before_step1", "before_step0", "before_step2"])
 
     def test_plan_refusals(self):
         self.unlock()
