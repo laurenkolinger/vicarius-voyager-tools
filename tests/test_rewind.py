@@ -92,6 +92,14 @@ class Folder(unittest.TestCase):
     def chunks(self):
         return json.loads(Path(self.psx).read_text())["chunks"]
 
+    def _write_raw_status(self, value):
+        """Hand-edit the row's status cell the way a spreadsheet would (upsert refuses unknown values)."""
+        rows = self.registry._read_rows()
+        for r in rows:
+            if r["readable_id"] == RID:
+                r["manual_edit_status"] = value
+        self.registry._write_rows(rows)
+
     def status_row(self, rid):
         with open(os.path.join(self.folder, "status.csv"), newline="") as fh:
             return next(r for r in csv.DictReader(fh) if r["Model ID"] == rid)
@@ -100,19 +108,19 @@ class Folder(unittest.TestCase):
 class Refusals(Folder):
     def test_unknown_target(self):
         with self.assertRaises(ValueError):
-            rw.refusal(self.row, "before_step9", not_live)
+            rw.refusal(self.row, "before_step9", not_live, registry_mod=self.registry)
         with self.assertRaises(ValueError):
-            rw.plan(self.row, "sideways")
+            rw.plan(self.row, "sideways", registry_mod=self.registry)
 
     def test_no_row(self):
-        self.assertIn("No registry row", rw.refusal(None, rw.TARGET_BEFORE_STEP1, not_live))
+        self.assertIn("No registry row", rw.refusal(None, rw.TARGET_BEFORE_STEP1, not_live, registry_mod=self.registry))
 
     def test_live_row_refused_with_the_phrase(self):
         lock_path = os.path.join(self.folder, ".processing.lock")
         fh = open(lock_path, "w")
         fcntl.flock(fh, fcntl.LOCK_EX)
         try:
-            why = rw.refusal(self.row, rw.TARGET_BEFORE_STEP1, self.registry.run_is_live)
+            why = rw.refusal(self.row, rw.TARGET_BEFORE_STEP1, self.registry.run_is_live, registry_mod=self.registry)
             self.assertIn("processing right now", why)
             with self.assertRaises(rw.RewindRefused):
                 rw.apply(self.row, rw.TARGET_BEFORE_STEP1, self.registry, "voyager_tools:LO", fake_chunk_runner,
@@ -124,27 +132,64 @@ class Refusals(Folder):
 
     def test_remote_folder_shows_the_pullback_command(self):
         row = dict(self.row, processing_location="146.226.147.140:/volume6/x/MRS_T1_3D")
-        why = rw.refusal(row, rw.TARGET_BEFORE_STEP1, not_live)
+        why = rw.refusal(row, rw.TARGET_BEFORE_STEP1, not_live, registry_mod=self.registry)
         self.assertIn("not on this machine", why)
         self.assertIn("/api/pullback", why)
         self.assertIn(RID, why)
 
     def test_missing_local_folder_and_blank_location(self):
         row = dict(self.row, processing_location=os.path.join(self.root, "ZZZ_T2_3D"))
-        self.assertIn("not on this machine", rw.refusal(row, rw.TARGET_BEFORE_STEP1, not_live))
+        self.assertIn("not on this machine", rw.refusal(row, rw.TARGET_BEFORE_STEP1, not_live, registry_mod=self.registry))
         row = dict(self.row, processing_location="")
-        self.assertIn("no processing folder", rw.refusal(row, rw.TARGET_BEFORE_STEP1, not_live))
+        self.assertIn("no processing folder", rw.refusal(row, rw.TARGET_BEFORE_STEP1, not_live, registry_mod=self.registry))
 
     def test_row_in_the_manual_edit_job(self):
-        why = rw.refusal(self.row, rw.TARGET_BEFORE_STEP1, not_live, active_job_ids=[RID])
-        self.assertIn("manual edit job", why)
+        why = rw.refusal(self.row, rw.TARGET_BEFORE_STEP1, not_live, active_job_ids=[RID], registry_mod=self.registry)
+        self.assertEqual(why, f"{RID} is in an unfinished manual edit project; cancel that project in Clean manual "
+                              f"edit run first.")
+
+    def test_every_status_after_the_pull_is_refused(self):
+        for status in self.registry.MANUAL_EDIT_IN_FLIGHT:
+            with self.subTest(status=status):
+                row = dict(self.row, manual_edit_status=status)
+                why = rw.refusal(row, rw.TARGET_BEFORE_STEP1, not_live, registry_mod=self.registry)
+                self.assertEqual(why, f"{RID} is on the edit bench in a manual edit project; decide or cancel that "
+                                      f"project first.")
+                self._write_raw_status(status)
+                with self.assertRaises(rw.RewindRefused):
+                    rw.apply(self.registry.get(RID), rw.TARGET_BEFORE_STEP1, self.registry, "voyager_tools:LO",
+                             fake_chunk_runner, not_live)
+                self.assertEqual(self.chunks(), [SIBLING, RID])
+                self.assertEqual(self.registry.get(RID)["manual_edit_status"], status)
+                self.assertTrue(os.path.exists(os.path.join(self.folder, "reports", f"{RID}_step1.pdf")))
+
+    def test_a_status_vicarius_does_not_know_is_refused(self):
+        for value in ("Reviewed", "DONE", "certified"):
+            with self.subTest(value=value):
+                row = dict(self.row, manual_edit_status=value)
+                why = rw.refusal(row, rw.TARGET_BEFORE_STEP1, not_live, registry_mod=self.registry)
+                self.assertEqual(why, f"{RID} holds the manual edit status {value!r}, which VICARIUS does not know; "
+                                      f"repair it from the atlas in admin mode first.")
+
+    def test_statuses_the_rewind_reset_moves_are_allowed(self):
+        for status in self.registry.MANUAL_EDIT_RESETS[rw.REWIND_RESET][0]:
+            with self.subTest(status=status):
+                row = dict(self.row, manual_edit_status=status)
+                self.assertEqual(rw.refusal(row, rw.TARGET_BEFORE_STEP1, not_live, registry_mod=self.registry), "")
+        row = dict(self.row, manual_edit_status="  awaiting ")
+        self.assertEqual(rw.refusal(row, rw.TARGET_BEFORE_STEP1, not_live, registry_mod=self.registry), "")
+
+    def test_the_status_refusal_comes_before_the_location_refusals(self):
+        row = dict(self.row, manual_edit_status="editing", processing_location="146.226.147.140:/volume6/x/MRS_T1_3D")
+        why = rw.refusal(row, rw.TARGET_BEFORE_STEP1, not_live, registry_mod=self.registry)
+        self.assertIn("on the edit bench", why)
 
     def test_nothing_to_rewind(self):
         bare = dict(self.row)
         for cell in rw.STEP1_REGISTRY_CELLS:
             bare[cell] = ""
         os.remove(os.path.join(self.folder, "reports", f"{RID}_step1.pdf"))
-        self.assertTrue(rw.plan(bare, rw.TARGET_BEFORE_STEP1)["empty"])
+        self.assertTrue(rw.plan(bare, rw.TARGET_BEFORE_STEP1, registry_mod=self.registry)["empty"])
         with self.assertRaises(rw.RewindRefused) as caught:
             rw.apply(bare, rw.TARGET_BEFORE_STEP1, self.registry, "voyager_tools:LO", fake_chunk_runner, not_live)
         self.assertIn("nothing to rewind", str(caught.exception))
@@ -156,7 +201,7 @@ class Refusals(Folder):
 
 class DryRun(Folder):
     def test_plan_before_step1(self):
-        plan = rw.plan(self.row, rw.TARGET_BEFORE_STEP1, stamp="20260904-010000")
+        plan = rw.plan(self.row, rw.TARGET_BEFORE_STEP1, stamp="20260904-010000", registry_mod=self.registry)
         self.assertEqual(plan["target_words"], "before step 1")
         self.assertEqual(plan["rewind_dir"], os.path.join(self.folder, "_rewind", "20260904-010000"))
         self.assertEqual([m["kind"] for m in plan["moves"]], ["report"])
@@ -173,29 +218,29 @@ class DryRun(Folder):
         self.assertEqual(self.chunks(), [SIBLING, RID])
 
     def test_plan_before_step0_adds_frames(self):
-        plan = rw.plan(self.row, rw.TARGET_BEFORE_STEP0)
+        plan = rw.plan(self.row, rw.TARGET_BEFORE_STEP0, registry_mod=self.registry)
         self.assertEqual(sorted(m["kind"] for m in plan["moves"]), ["frames", "report"])
         self.assertIn("Step 0 complete", plan["status_resets"])
 
     def test_plan_warnings(self):
         row = dict(self.row, psx_file="", manual_edit_status="done")
         shutil.rmtree(os.path.join(self.folder, "frames", RID))
-        plan = rw.plan(row, rw.TARGET_BEFORE_STEP0)
+        plan = rw.plan(row, rw.TARGET_BEFORE_STEP0, registry_mod=self.registry)
         self.assertIsNone(plan["chunk"])
         self.assertTrue(any("No psx" in w for w in plan["warnings"]))
         self.assertTrue(any("manually edited" in w for w in plan["warnings"]))
         self.assertTrue(any("No frames folder" in w for w in plan["warnings"]))
         row = dict(self.row, psx_file="missing.psx")
-        plan = rw.plan(row, rw.TARGET_BEFORE_STEP1)
+        plan = rw.plan(row, rw.TARGET_BEFORE_STEP1, registry_mod=self.registry)
         self.assertFalse(plan["chunk"]["present"])
 
     def test_plan_refuses_a_non_row(self):
         with self.assertRaises(TypeError):
-            rw.plan("MRS_T1_2024ann", rw.TARGET_BEFORE_STEP1)
+            rw.plan("MRS_T1_2024ann", rw.TARGET_BEFORE_STEP1, registry_mod=self.registry)
 
     def test_hostile_id_never_globs(self):
         row = dict(self.row, readable_id="[a-z]*")
-        self.assertEqual(rw.plan(row, rw.TARGET_BEFORE_STEP1)["moves"], [])
+        self.assertEqual(rw.plan(row, rw.TARGET_BEFORE_STEP1, registry_mod=self.registry)["moves"], [])
 
 
 class Apply(Folder):
@@ -230,6 +275,32 @@ class Apply(Folder):
         events = Path(self.root, "events.csv").read_text()
         self.assertIn("voyager_tools:LO", events)
         self.assertIn("step1_status,complete,", events)
+
+    def test_reset_name_and_status_cells_come_from_the_registry(self):
+        self.assertIn(rw.REWIND_RESET, self.registry.MANUAL_EDIT_RESETS)
+        self.assertEqual(self.registry.MANUAL_EDIT_RESETS[rw.REWIND_RESET][1], (self.registry.ME_BLANK,))
+        self.assertIn(self.registry.MANUAL_EDIT_STATUS_COLUMN, rw.STEP1_REGISTRY_CELLS)
+        self.assertIn(self.registry.MANUAL_EDIT_DONE_COLUMN, rw.STEP1_REGISTRY_CELLS)
+        for cell in rw.STEP1_REGISTRY_CELLS:
+            self.assertIn(cell, self.registry.COLUMNS, cell)
+
+    def test_a_done_row_rewinds_through_the_named_reset_under_the_upsert_guard(self):
+        self.registry.MANUAL_EDIT_UPSERT_GUARD = True
+        self._write_raw_status("done")
+        self.registry.upsert(RID, {"manual_edit_done": "2026-09-26 21:07:00"}, "seed")
+        manifest = rw.apply(self.registry.get(RID), rw.TARGET_BEFORE_STEP1, self.registry, "voyager_tools:LO",
+                            fake_chunk_runner, not_live)
+        row = self.registry.get(RID)
+        self.assertEqual((row["manual_edit_status"], row["manual_edit_done"]), ("", ""))
+        self.assertEqual(manifest["registry_resets"]["manual_edit_status"], "done")
+        self.assertTrue(any("manually edited" in w for w in manifest["warnings"]))
+        events = Path(self.root, "events.csv").read_text()
+        self.assertIn(f",voyager_tools:LO,{RID},manual_edit_status,done,\n", events)
+
+    def test_an_awaiting_row_rewinds_under_the_upsert_guard(self):
+        self.registry.MANUAL_EDIT_UPSERT_GUARD = True
+        rw.apply(self.row, rw.TARGET_BEFORE_STEP1, self.registry, "voyager_tools:LO", fake_chunk_runner, not_live)
+        self.assertEqual(self.registry.get(RID)["manual_edit_status"], "")
 
     def test_apply_before_step0_moves_frames(self):
         rw.apply(self.row, rw.TARGET_BEFORE_STEP0, self.registry, "voyager_tools:LO", fake_chunk_runner, not_live,

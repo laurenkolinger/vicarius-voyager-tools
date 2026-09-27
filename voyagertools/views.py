@@ -51,7 +51,7 @@ URL_PREFIX = "/voyager-tools"
 MODULE_SLUG = "voyager_tools"
 DISPLAY_NAME = "Voyager tools"
 UI_STYLE = "voyager_tools"
-ASSET_VERSION = "20260906a"
+ASSET_VERSION = "20260927a"
 ROOT_SECTION_PREFIX = '<section class="voyager-tools"'
 STATIC_JS = "voyager_tools.js"
 STATIC_CSS = "voyager_tools.css"
@@ -84,6 +84,8 @@ ACTOR_PREFIX = "voyager_tools:"
 MAX_BODY_BYTES = 2 * 1024 * 1024
 MAX_PROMPTS_BYTES = 4 * 1024 * 1024
 LOG_TAIL = 20
+JOB_ID_KEY = "job_id"
+MAX_JOB_ID_CHARS = 64
 CONFIRM_KEY = "confirm"
 AST = timezone(timedelta(hours=-4))
 LOCKED_PHRASE = "locked by"
@@ -128,6 +130,21 @@ def _job_store_default():
         sys.path.insert(0, path)
     jobstore = importlib.import_module("manualedit.jobstore")
     return jobstore.JobStore(_registry_module().ROOT)
+
+
+def _active_jobs_default() -> list[dict]:
+    """Every unfinished manual edit job record, oldest first.
+
+    Reads JobStore.active_jobs() (program B's milestone B1, several projects
+    at once); a store without it answers its one active job, so the tools
+    work on today's single-job store and on B1's without a change here.
+    """
+    store = deps.job_store()
+    lister = getattr(store, "active_jobs", None)
+    if callable(lister):
+        return list(lister())
+    job = store.active_job()
+    return [job] if job else []
 
 
 def _read_locks_file() -> bool:
@@ -201,6 +218,7 @@ class Deps:
 
     Attributes are plain callables: is_locked() -> bool; is_admin() -> bool;
     registry() -> the registry module; job_store() -> JobStore;
+    active_jobs() -> [every unfinished manual edit job record];
     params_store() -> ParamsStore; nas_config() -> dict; workbench_roots()
     -> [paths]; local_snapshot(path) -> snapshot; remote_snapshot(path) ->
     snapshot; rmtree(path); append_processing_log(row); run_chunk(psx,
@@ -214,6 +232,7 @@ class Deps:
         self.is_admin: Callable[[], bool] = lambda: bool(session.get("admin_unlocked"))
         self.registry: Callable = _registry_module
         self.job_store: Callable = _job_store_default
+        self.active_jobs: Callable[[], list] = _active_jobs_default
         self.params_store: Callable = ps.ParamsStore
         self.nas_config: Callable[[], dict] = _nas_config_default
         self.workbench_roots: Callable[[], list] = _workbench_roots_default
@@ -359,16 +378,32 @@ def _rows() -> list[dict]:
     return deps.registry().load()
 
 
-def _active_job_ids() -> tuple[list[str], dict | None]:
-    """Ids in the active manual edit job and the job record; ([], None) when none or unreadable."""
+def _unfinished_jobs() -> list[dict]:
+    """Every unfinished manual edit job record; a store that cannot be read is a RequestError (500)."""
     try:
-        job = deps.job_store().active_job()
-    except Exception:  # noqa: BLE001  (a corrupt pointer must not take the other tools down)
-        return [], None
-    if not job:
-        return [], None
-    ids = [str(r.get("readable_id") or "") for r in job.get("rows") or [] if isinstance(r, Mapping)]
-    return ids, job
+        return [job for job in deps.active_jobs() if isinstance(job, Mapping)]
+    except Exception as exc:  # noqa: BLE001  (the store's own error classes all mean: fix the file)
+        raise RequestError(f"The manual edit job files cannot be read: {exc}", HTTP_SERVER_ERROR)
+
+
+def _active_job_ids() -> tuple[list[str], list[dict]]:
+    """The readable ids of every unfinished manual edit project (their union) and the job records.
+
+    An unreadable store answers ([], []): the registry status refusal in
+    rewind.refusal still holds every row that left the Shelf for the bench,
+    so a corrupt job file never takes the other tools down.
+    """
+    try:
+        jobs = _unfinished_jobs()
+    except RequestError:
+        return [], []
+    ids: list[str] = []
+    for job in jobs:
+        for row in job.get("rows") or []:
+            rid = str(row.get("readable_id") or "") if isinstance(row, Mapping) else ""
+            if rid and rid not in ids:
+                ids.append(rid)
+    return ids, jobs
 
 
 def _phase(value) -> str:
@@ -441,7 +476,7 @@ def api_state():
     """What the left list shows beside each tool: the order lock, the active job, the default versions."""
     registry = deps.registry()
     lock = registry.processing_order_lock()
-    ids, job = _active_job_ids()
+    _ids, jobs = _active_job_ids()
     defaults = {}
     for phase in ps.PHASES:
         try:
@@ -450,7 +485,8 @@ def api_state():
             defaults[phase] = ""
     return jsonify({
         "admin": True, "order": {"locked": lock is not None, "lock": lock, "count": len(registry.processing_order())},
-        "manual_edit": {"job_id": job["job_id"], "phase": job["phase"], "rows": len(ids)} if job else None,
+        "manual_edit": [{"job_id": job.get("job_id"), "phase": job.get("phase"), "rows": len(job.get("rows") or [])}
+                        for job in jobs],
         "params_default": defaults, "workbench_roots": deps.workbench_roots(),
         "prompts_doc": str(deps.prompts_doc()), "now": deps.now_iso(),
     })
@@ -571,42 +607,41 @@ def api_workbench_delete():
 
 # --- tool 3: clean manual edit run ----------------------------------------------------------
 
-def _current_job(store):
-    """The job current.json names (any phase), or None; a corrupt pointer is a RequestError."""
-    try:
-        pointer = store.current()
-        return store.load_job(pointer["job_id"]) if pointer else None
-    except Exception as exc:  # noqa: BLE001  (the store's own error classes all mean: fix the file)
-        raise RequestError(f"The manual edit job files cannot be read: {exc}", HTTP_SERVER_ERROR)
+def _job_id(body: Mapping) -> str:
+    """The job_id the body names, stripped; a missing, blank, non-string or oversized value is a 400."""
+    value = body.get(JOB_ID_KEY)
+    text = value.strip() if isinstance(value, str) else ""
+    if not text or len(text) > MAX_JOB_ID_CHARS:
+        raise RequestError("Name the manual edit project to cancel (job_id).")
+    return text
 
 
 @voyager_tools_bp.route("/api/manual-edit", methods=["GET"])
 @guarded
 def api_manual_edit():
-    """The current manual edit job, summarised, or null."""
+    """Every unfinished manual edit project, summarised: {"jobs": [summary, ...]}."""
     store = deps.job_store()
-    job = _current_job(store)
-    if job is None:
-        return jsonify({"job": None})
-    tail = store.tail_log(job["job_id"], LOG_TAIL)
-    return jsonify({"job": clean_manual_edit.summarise(job, tail)})
+    registry = deps.registry()
+    summaries = [clean_manual_edit.summarise(job, store.tail_log(job["job_id"], LOG_TAIL), registry_mod=registry)
+                 for job in _unfinished_jobs()]
+    return jsonify({"jobs": summaries})
 
 
 @voyager_tools_bp.route("/api/manual-edit/cancel", methods=["POST"])
 @guarded
 def api_manual_edit_cancel():
-    """Cancel and prune the current job: {initials, confirm: true}."""
+    """Cancel and prune one unfinished project: {job_id, initials, confirm: true}."""
     body = _json_body()
     _confirmed(body)
     initials = _initials(body)
+    job_id = _job_id(body)
+    if job_id not in {job.get("job_id") for job in _unfinished_jobs()}:
+        raise RequestError(f"{job_id} is not an unfinished manual edit project; refresh the list.", HTTP_CONFLICT)
     store = deps.job_store()
-    job = _current_job(store)
-    if job is None:
-        raise RequestError("No manual edit job is active; there is nothing to cancel.", HTTP_CONFLICT)
     host = str(deps.nas_config().get("host") or "").strip()
     shelf_prefix = f"{host}:" if host else ""
     try:
-        result = clean_manual_edit.cancel_and_prune(store, deps.registry(), job["job_id"], initials,
+        result = clean_manual_edit.cancel_and_prune(store, deps.registry(), job_id, initials,
                                                     rmtree_fn=deps.rmtree, shelf_prefix=shelf_prefix)
     except clean_manual_edit.CancelRefused as exc:
         raise RequestError(str(exc), HTTP_CONFLICT)
@@ -638,7 +673,7 @@ def _rewind_rows(registry, active_ids) -> list[dict]:
 @guarded
 def api_rewind_rows():
     """The rows the rewind and spot redo selects list."""
-    active_ids, _job = _active_job_ids()
+    active_ids, _jobs = _active_job_ids()
     return jsonify({"rows": _rewind_rows(deps.registry(), set(active_ids)), "targets": [
         {"value": t, "label": rewind.TARGET_WORDS[t]} for t in rewind.TARGETS]})
 
@@ -657,8 +692,8 @@ def _rewind_row(registry, body: Mapping) -> tuple[dict, str]:
 
 def _refuse_rewind(registry, row: dict, target: str) -> None:
     """Raise the 409 refusal (with the pull-back command when that is the fix) when the row cannot rewind."""
-    active_ids, _job = _active_job_ids()
-    why = rewind.refusal(row, target, registry.run_is_live, active_ids)
+    active_ids, _jobs = _active_job_ids()
+    why = rewind.refusal(row, target, registry.run_is_live, active_ids, registry_mod=registry)
     if why:
         extra = {"pullback_command": rewind.pullback_command(row["readable_id"])} if "not on this machine" in why else {}
         raise RequestError(why, HTTP_CONFLICT, extra)
@@ -672,7 +707,7 @@ def api_rewind_plan():
     registry = deps.registry()
     row, target = _rewind_row(registry, body)
     _refuse_rewind(registry, row, target)
-    the_plan = rewind.plan(row, target)
+    the_plan = rewind.plan(row, target, registry_mod=registry)
     if the_plan["empty"]:
         raise RequestError(f"{row['readable_id']} has nothing to rewind {the_plan['target_words']}.", HTTP_CONFLICT)
     return jsonify({"ok": True, "plan": the_plan})
@@ -687,7 +722,7 @@ def _apply_rewind(body: Mapping, spot: bool) -> dict:
         body = dict(body, target=rewind.TARGET_BEFORE_STEP1)
     row, target = _rewind_row(registry, body)
     _refuse_rewind(registry, row, target)
-    active_ids, _job = _active_job_ids()
+    active_ids, _jobs = _active_job_ids()
     try:
         if spot:
             return rewind.spot_redo(row, registry, _actor(initials), initials, deps.run_chunk, registry.run_is_live,

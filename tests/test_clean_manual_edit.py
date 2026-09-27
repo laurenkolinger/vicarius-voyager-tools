@@ -31,7 +31,6 @@ for path in (REGISTRY_LIB_DIR, MANUAL_EDIT_CLONE):
         sys.path.insert(0, path)
 
 from manualedit import jobstore  # noqa: E402
-from manualedit import registry_contract  # noqa: E402
 from voyagertools import clean_manual_edit as cme  # noqa: E402
 
 HOST = "146.226.147.140"
@@ -52,9 +51,28 @@ class Pure(unittest.TestCase):
         self.assertEqual(cme.PHASE_VERIFYING, jobstore.VERIFYING)
         self.assertEqual(cme.PHASE_CANCELLED, jobstore.CANCELLED)
         self.assertEqual(cme.FAILED_PREFIX, jobstore.FAILED_PREFIX)
-        self.assertEqual(cme.STATUS_COLUMN, registry_contract.STATUS_COLUMN)
-        self.assertEqual(cme.DONE_COLUMN, registry_contract.DONE_COLUMN)
-        self.assertEqual(cme.STATUS_AWAITING, registry_contract.STATUS_AWAITING)
+
+    def test_certified_project_states_match_the_manual_edit_clone(self):
+        # Program B adds these transect states in B0c to B3; each one the job
+        # store already defines must carry the word this module mirrors.
+        for name, word in (("PROJECT_REVIEW", "review"), ("PROJECT_UPLOAD", "upload"),
+                           ("PROJECT_UPLOADING", "uploading"), ("PROJECT_RESTARTING", "restarting")):
+            with self.subTest(name=name):
+                self.assertIn(word, cme.CERTIFIED_PROJECT_STATES)
+                if hasattr(jobstore, name):
+                    self.assertEqual(getattr(jobstore, name), word)
+        self.assertEqual(len(cme.CERTIFIED_PROJECT_STATES), 4)
+
+    def test_reset_name_is_one_the_registry_knows(self):
+        import registry
+        self.assertIn(cme.CLEAN_MANUAL_EDIT_RESET, registry.MANUAL_EDIT_RESETS)
+        sources, targets = registry.MANUAL_EDIT_RESETS[cme.CLEAN_MANUAL_EDIT_RESET]
+        self.assertEqual((sources, targets), ((registry.ME_EDITING,), (registry.ME_AWAITING,)))
+
+    def test_no_status_literal_is_mirrored(self):
+        # The status words come from the registry library, never from a copy here.
+        for relic in ("STATUS_COLUMN", "DONE_COLUMN", "STATUS_AWAITING", "LOCATION_COLUMN"):
+            self.assertFalse(hasattr(cme, relic), relic)
 
     def test_actor(self):
         self.assertEqual(cme.actor("lo"), "voyager_tools:LO")
@@ -79,6 +97,24 @@ class Pure(unittest.TestCase):
         self.assertIn("pulling right now", cme.cancel_refusal({"job_id": "j", "phase": "pulling"}))
         self.assertEqual(cme.cancel_refusal({"job_id": "j", "phase": "editing"}), "")
         self.assertEqual(cme.cancel_refusal({"job_id": "j", "phase": "failed_pushing"}), "")
+
+    def test_a_certified_transect_refuses_the_cancel(self):
+        for state in cme.CERTIFIED_PROJECT_STATES:
+            with self.subTest(state=state):
+                job = {"job_id": "j", "phase": "editing",
+                       "projects": {"MRS_T1_2023_2025.psx": {"state": "done"},
+                                    "MRS_T2_2023_2025.psx": {"state": state}}}
+                why = cme.cancel_refusal(job)
+                self.assertEqual(why, "MRS_T2_2023_2025.psx carries a certified edit; decide it in the Review queue "
+                                      "or upload it before cancelling.")
+        for state in ("todo", "editing", "done", "failed", "", None):
+            with self.subTest(state=state):
+                job = {"job_id": "j", "phase": "editing", "projects": {"x.psx": {"state": state}}}
+                self.assertEqual(cme.cancel_refusal(job), "")
+        # a malformed projects map refuses nothing extra and never raises
+        for junk in ("junk", ["x"], {"x.psx": "junk"}, None):
+            with self.subTest(projects=junk):
+                self.assertEqual(cme.cancel_refusal({"job_id": "j", "phase": "editing", "projects": junk}), "")
 
     def test_prune_targets_are_anchored(self):
         bench = tempfile.mkdtemp(prefix="vt-bench-")
@@ -144,13 +180,17 @@ class WithStores(unittest.TestCase):
         importlib.reload(registry)
 
     def advance(self, *phases):
-        """Walk the job through phases; reaching certified passes the checks gate and calls certify()
-        (jobstore.transition refuses "certified" directly: only certify() may record the statement)."""
+        """Walk the job through phases; reaching certified marks every project done, passes the checks
+        gate and calls certify() (jobstore.transition refuses "certified" directly: only certify() may
+        record the statement, and certify() refuses while any project is unfinished)."""
         for phase in phases:
             if phase == "certified":
-                self.store.transition(self.job["job_id"], "checking", "LO")
-                self.store.finish_checks(self.job["job_id"], {"verdict": "pass", "items": [], "by_psx": {}}, "LO")
-                self.store.certify(self.job["job_id"], "LO", "reviewed and certified for testing")
+                job_id = self.job["job_id"]
+                for psx in self.store.load_job(job_id)["projects"]:
+                    self.store.set_project_state(job_id, psx, jobstore.PROJECT_DONE, "LO")
+                self.store.transition(job_id, "checking", "LO")
+                self.store.finish_checks(job_id, {"verdict": "pass", "items": [], "by_psx": {}}, "LO")
+                self.store.certify(job_id, "LO", "reviewed and certified for testing")
                 continue
             self.store.transition(self.job["job_id"], phase, "LO", reason="test" if phase.startswith("failed_") else "")
 
@@ -173,7 +213,8 @@ class WithStores(unittest.TestCase):
         events = Path(self.root, "events.csv").read_text()
         self.assertIn("voyager_tools:LO", events)
         self.assertEqual(result["restored"][0], {"readable_id": RID, "location_restored": True,
-                                                 "status_reset": True, "missing": False})
+                                                 "status_reset": True, "missing": False, "status_kept": None})
+        self.assertIn(f",voyager_tools:LO,{RID},manual_edit_status,editing,awaiting\n", events)
 
     def test_cancel_after_a_failed_push_keeps_the_local_copy(self):
         self.advance("pulling", "editing", "certified", "pushing", "failed_pushing")
@@ -247,6 +288,76 @@ class WithStores(unittest.TestCase):
     def test_restore_with_an_empty_prefix_keeps_todays_bare_behaviour(self):
         cme.restore_registry(self.job, self.registry, "voyager_tools:LO")
         self.assertEqual(self.registry.get(RID)["processing_location"], f"{SHELF_PARENT}/{FOLDER}")
+
+    def _write_raw_status(self, value):
+        """Hand-edit the row's status cell the way a spreadsheet would (upsert refuses unknown values)."""
+        rows = self.registry._read_rows()
+        for r in rows:
+            if r["readable_id"] == RID:
+                r["manual_edit_status"] = value
+        self.registry._write_rows(rows)
+
+    def test_restore_moves_only_a_row_still_at_editing(self):
+        shelf = f"{SHELF_PARENT}/{FOLDER}"
+        relocated = self.registry.MANUAL_EDIT_VOYAGER1_ELIGIBLE + (self.registry.ME_EDITING,)
+        for status in self.registry.MANUAL_EDIT_STATUSES + ("Reviewed",):
+            with self.subTest(status=status):
+                self.registry.upsert(RID, {"processing_location": self.local, "manual_edit_done": ""}, "seed")
+                self._write_raw_status(status)
+                result = cme.restore_registry(self.job, self.registry, "voyager_tools:LO")[0]
+                row = self.registry.get(RID)
+                if status == self.registry.ME_EDITING:
+                    self.assertEqual(row["manual_edit_status"], self.registry.ME_AWAITING)
+                    self.assertTrue(result["status_reset"])
+                    self.assertIsNone(result["status_kept"])
+                else:
+                    self.assertEqual(row["manual_edit_status"], status)
+                    self.assertFalse(result["status_reset"])
+                    self.assertEqual(result["status_kept"], status)
+                if status in relocated:
+                    self.assertEqual(row["processing_location"], shelf)
+                    self.assertTrue(result["location_restored"])
+                else:
+                    self.assertEqual(row["processing_location"], self.local)
+                    self.assertFalse(result["location_restored"])
+
+    def test_restore_keeps_a_done_stamp_it_does_not_own(self):
+        self.registry.upsert(RID, {"manual_edit_status": "done", "manual_edit_done": "2026-09-26 21:07:00"}, "seed")
+        cme.restore_registry(self.job, self.registry, "voyager_tools:LO")
+        row = self.registry.get(RID)
+        self.assertEqual((row["manual_edit_status"], row["manual_edit_done"]), ("done", "2026-09-26 21:07:00"))
+
+    def test_restore_writes_through_the_named_reset_under_the_upsert_guard(self):
+        self.registry.MANUAL_EDIT_UPSERT_GUARD = True
+        cme.restore_registry(self.job, self.registry, "voyager_tools:LO")
+        self.assertEqual(self.registry.get(RID)["manual_edit_status"], "awaiting")
+        self._write_raw_status("done")
+        cme.restore_registry(self.job, self.registry, "voyager_tools:LO")
+        self.assertEqual(self.registry.get(RID)["manual_edit_status"], "done")
+
+    def test_cancel_refused_while_the_registry_records_a_certified_edit(self):
+        self.advance("pulling", "editing")
+        for status in ("review", "upload"):
+            with self.subTest(status=status):
+                self._write_raw_status(status)
+                before = Path(self.root, "events.csv").read_text()
+                with self.assertRaises(cme.CancelRefused) as caught:
+                    cme.cancel_and_prune(self.store, self.registry, self.job["job_id"], "LO")
+                self.assertEqual(str(caught.exception),
+                                 f"{RID} carries a certified edit (manual edit status {status}); decide it in the "
+                                 f"Review queue or upload it before cancelling.")
+                self.assertTrue(os.path.exists(self.local))
+                self.assertEqual(self.registry.get(RID)["manual_edit_status"], status)
+                self.assertEqual(Path(self.root, "events.csv").read_text(), before)
+                self.assertEqual(self.store.load_job(self.job["job_id"])["phase"], "editing")
+
+    def test_summarise_names_the_registry_refusal_when_given_the_registry(self):
+        self._write_raw_status("review")
+        summary = cme.summarise(self.store.load_job(self.job["job_id"]), registry_mod=self.registry)
+        self.assertFalse(summary["can_cancel"])
+        self.assertFalse(summary["will_prune"])
+        self.assertIn("certified edit", summary["refusal"])
+        self.assertTrue(cme.summarise(self.store.load_job(self.job["job_id"]))["can_cancel"])
 
     def test_cancel_and_prune_forwards_shelf_prefix(self):
         self.advance("pulling", "editing")

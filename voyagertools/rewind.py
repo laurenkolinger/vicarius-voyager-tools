@@ -8,19 +8,24 @@ Purpose: The rewind and spot redo tools (program spec section 7, tools 4 and
          <processing folder>/_rewind/<stamp>/, removes the timepoint's chunk
          from the Metashape project through scripts/rewind_chunk.py, clears
          the step's cells in status.csv, and resets the step's registry cells
-         through registry.upsert so every cell leaves an event. Spot redo is
+         through registry.upsert with the named reset rewind (blank, awaiting
+         or done to blank, chain program A section 4.1) so every cell leaves
+         an event. Spot redo is
          the same rewind before step 1 plus a voyager1 fact "spot_redo" that
          makes the row eligible again in the Voyager 1 setup window.
-Inputs:  a registry row, the target, the registry library, an actor, a chunk
-         removal function (the real one runs metashape -r; tests inject the
-         fake mode), a liveness probe.
+Inputs:  a registry row, the target, the registry library (its manual edit
+         vocabulary: MANUAL_EDIT_STATUSES, MANUAL_EDIT_IN_FLIGHT,
+         MANUAL_EDIT_RESETS), an actor, a chunk removal function (the real
+         one runs metashape -r; tests inject the fake mode), a liveness probe.
 Outputs: a plan dict; on apply the moved artifacts, the manifest
          <folder>/_rewind/<stamp>/rewind.json, the registry events.
 
 Refusals: no such row; the row is processing right now (its lock is held);
-the processing folder is not on this machine (the Carousel's pull-back
-brings it down; the command is shown, never run here); the row sits in the
-manual edit job; nothing to rewind.
+its manual edit status is one after the pull (editing, review, upload) or a
+value VICARIUS does not know, so the rewind reset may not move it; the row
+sits in an unfinished manual edit project; the processing folder is not on
+this machine (the driver's pull-back brings it down; the command is shown,
+never run here); nothing to rewind.
 """
 from __future__ import annotations
 
@@ -78,6 +83,9 @@ STATUS_STEP0_CELLS = {
     "Step 0 error time": "",
 }
 INACTIVE_STAGES = ("", "done", "failed")
+# The registry's named reset for a rewind (a key of registry.MANUAL_EDIT_RESETS);
+# the upsert guard of milestone A1g checks the move against it.
+REWIND_RESET = "rewind"
 SPOT_REDO_SECTION = "voyager1"
 SPOT_REDO_KEY = "spot_redo"
 METASHAPE_ENV = "METASHAPE_PATH"
@@ -136,14 +144,35 @@ def row_started(row: Mapping) -> bool:
     return str(row.get("stage") or "").strip() not in INACTIVE_STAGES
 
 
-def refusal(row, target: str, is_live_fn: Callable, active_job_ids: Iterable[str] = ()) -> str:
+def status_refusal(row: Mapping, registry_mod) -> str:
+    """Why the row's manual edit status forbids a rewind, or "" when the rewind reset may move it.
+
+    A status after the pull (registry_mod.MANUAL_EDIT_IN_FLIGHT) means the
+    bench copy holds a hand edit the Shelf does not have yet; a value outside
+    registry_mod.MANUAL_EDIT_STATUSES is a hand-typed cell that needs the
+    atlas repair first. Both are refused before anything moves, because the
+    registry's rewind reset would refuse the write after the chunk is gone.
+    """
+    rid = str(row.get("readable_id") or "")
+    status = str(row.get(registry_mod.MANUAL_EDIT_STATUS_COLUMN) or "").strip()
+    if status in registry_mod.MANUAL_EDIT_IN_FLIGHT:
+        return f"{rid} is on the edit bench in a manual edit project; decide or cancel that project first."
+    sources, _targets = registry_mod.MANUAL_EDIT_RESETS[REWIND_RESET]
+    if status not in sources:
+        return (f"{rid} holds the manual edit status {status!r}, which VICARIUS does not know; "
+                f"repair it from the atlas in admin mode first.")
+    return ""
+
+
+def refusal(row, target: str, is_live_fn: Callable, active_job_ids: Iterable[str] = (), *, registry_mod) -> str:
     """Why the row cannot be rewound now, or "" when it can.
 
     Parameters:
         row: the registry row, or None when the id had none.
         target: one of TARGETS.
         is_live_fn: registry.run_is_live.
-        active_job_ids: readable ids in the current manual edit job.
+        active_job_ids: readable ids in every unfinished manual edit project.
+        registry_mod: the registry library, for the manual edit vocabulary.
     """
     target_words(target)
     if not isinstance(row, Mapping):
@@ -151,8 +180,11 @@ def refusal(row, target: str, is_live_fn: Callable, active_job_ids: Iterable[str
     rid = str(row.get("readable_id") or "")
     if is_live_fn(row):
         return f"{rid} is {RUNNING_PHRASE}; the rewind is blocked until the run stops."
+    why = status_refusal(row, registry_mod)
+    if why:
+        return why
     if rid in set(active_job_ids or ()):
-        return f"{rid} is in the manual edit job; cancel the job in Clean manual edit run first."
+        return f"{rid} is in an unfinished manual edit project; cancel that project in Clean manual edit run first."
     location = str(row.get("processing_location") or "").strip()
     if not location:
         return f"{rid} has no processing folder recorded, so there is nothing to rewind."
@@ -189,13 +221,15 @@ def status_resets(target: str) -> dict[str, str]:
     return cells
 
 
-def plan(row: Mapping, target: str, stamp: str | None = None) -> dict:
+def plan(row: Mapping, target: str, stamp: str | None = None, *, registry_mod) -> dict:
     """What a rewind would do, without doing it (the dry run).
 
     Parameters:
         row: a registry row whose processing folder is local (see refusal()).
         target: one of TARGETS.
         stamp: the rewind folder stamp; None means now.
+        registry_mod: the registry library, for the manual edit vocabulary
+            (a done row carries a warning that its hand edits go).
 
     Returns:
         {"readable_id", "target", "target_words", "folder", "stamp", "rewind_dir",
@@ -228,7 +262,7 @@ def plan(row: Mapping, target: str, stamp: str | None = None) -> dict:
         chunk = {"psx": psx, "present": os.path.exists(psx)}
         if not chunk["present"]:
             warnings.append(f"The recorded psx {psx} is not on disk; no chunk is removed.")
-    if str(row.get("manual_edit_status") or "") == "done":
+    if str(row.get(registry_mod.MANUAL_EDIT_STATUS_COLUMN) or "").strip() == registry_mod.ME_DONE:
         warnings.append("This row was manually edited; the hand edits inside its chunk go with the rewind.")
     resets = registry_resets(row, target)
     empty = not moves and not (chunk and chunk["present"]) and not resets
@@ -303,8 +337,8 @@ def apply(row: Mapping, target: str, registry_mod, actor: str, run_chunk_fn: Cal
     removal through run_chunk_fn(psx, label, rewind_dir) -> the
     rewind_chunk.py result document (an error there stops everything before
     any file moves); the artifact moves into the rewind folder; the
-    status.csv resets; the registry resets through registry.upsert (one
-    event per cell); the manifest.
+    status.csv resets; the registry resets through registry.upsert with the
+    named reset REWIND_RESET (one event per cell); the manifest.
 
     Parameters:
         row: the registry row.
@@ -313,7 +347,7 @@ def apply(row: Mapping, target: str, registry_mod, actor: str, run_chunk_fn: Cal
         actor: "voyager_tools:<INITIALS>".
         run_chunk_fn: see above; called only when a psx is recorded and present.
         is_live_fn: registry.run_is_live.
-        active_job_ids: ids in the current manual edit job.
+        active_job_ids: ids in every unfinished manual edit project.
         stamp: the rewind folder stamp (None means now).
         move_fn: injectable for tests.
 
@@ -324,12 +358,12 @@ def apply(row: Mapping, target: str, registry_mod, actor: str, run_chunk_fn: Cal
         RewindRefused: for every refusal, including a chunk removal error.
         OSError: when a move or a status.csv rewrite fails.
     """
-    why = refusal(row, target, is_live_fn, active_job_ids)
+    why = refusal(row, target, is_live_fn, active_job_ids, registry_mod=registry_mod)
     if why:
         raise RewindRefused(why)
     if not isinstance(actor, str) or not actor.strip():
         raise ValueError("actor must be a non-blank string")
-    the_plan = plan(row, target, stamp)
+    the_plan = plan(row, target, stamp, registry_mod=registry_mod)
     if the_plan["empty"]:
         raise RewindRefused(f"{the_plan['readable_id']} has nothing to rewind {the_plan['target_words']}: "
                             f"no artifacts, no chunk and no registry cells to reset.")
@@ -357,7 +391,7 @@ def apply(row: Mapping, target: str, registry_mod, actor: str, run_chunk_fn: Cal
         raise
     resets = {cell: "" for cell in the_plan["registry_resets"]}
     if resets:
-        registry_mod.upsert(the_plan["readable_id"], resets, actor)
+        registry_mod.upsert(the_plan["readable_id"], resets, actor, manual_edit_reset=REWIND_RESET)
     manifest = {
         "readable_id": the_plan["readable_id"], "target": target, "target_words": the_plan["target_words"],
         "folder": the_plan["folder"], "stamp": the_plan["stamp"], "rewind_dir": rewind_dir, "actor": actor,
@@ -447,8 +481,8 @@ def run_chunk_script(psx: str, label: str, out_dir: str, metashape_bin: str | No
 
 __all__ = [
     "TARGETS", "TARGET_BEFORE_STEP1", "TARGET_BEFORE_STEP0", "TARGET_WORDS", "REWIND_DIR", "STEP1_REGISTRY_CELLS",
-    "STATUS_STEP1_CELLS", "STATUS_STEP0_CELLS", "SPOT_REDO_SECTION", "SPOT_REDO_KEY", "REWIND_CHUNK_SCRIPT",
-    "RewindRefused", "now_iso", "now_compact", "target_words", "is_local_folder", "is_remote_location",
-    "pullback_command", "row_started", "refusal", "registry_resets", "status_resets", "plan", "reset_status_csv",
+    "STATUS_STEP1_CELLS", "STATUS_STEP0_CELLS", "REWIND_RESET", "SPOT_REDO_SECTION", "SPOT_REDO_KEY",
+    "REWIND_CHUNK_SCRIPT", "RewindRefused", "now_iso", "now_compact", "target_words", "is_local_folder",
+    "is_remote_location", "pullback_command", "row_started", "status_refusal", "refusal", "registry_resets", "status_resets", "plan", "reset_status_csv",
     "apply", "spot_redo_fact", "spot_redo", "metashape_binary", "run_chunk_script",
 ]
