@@ -66,7 +66,7 @@ FOLDER = "MRS_T1_3D"  # the one processing folder of MRS T1, named for site and 
 # of them in milestone C6.
 NAV_GROUPS = [
     ("Records", ["order", "seasons", "prompts"]),
-    ("Manual edit", ["uploads", "timelines", "settings", "shelf", "manual"]),
+    ("Manual edit", ["review", "uploads", "timelines", "settings", "shelf", "manual"]),
     ("Voyager", ["runs", "params", "rewind", "spot", "workbench"]),
     ("Desktop", ["locks", "modules", "appearance", "floors", "gpu"]),
     ("History", ["history"]),
@@ -74,7 +74,7 @@ NAV_GROUPS = [
 ALL_TABS = [key for _group, keys in NAV_GROUPS for key in keys]
 # The panel's scripts in load order: the pane seam first, then one script per
 # group of panes (program C spec 5.3).
-PANEL_SCRIPT_NAMES = ["voyager_tools.js", "vt_settings.js", "vt_uploads.js", "vt_timelines.js"]
+PANEL_SCRIPT_NAMES = ["voyager_tools.js", "vt_settings.js", "vt_uploads.js", "vt_timelines.js", "vt_review.js"]
 PANEL_SCRIPT_URLS = ["/voyager-tools/static/" + name + "?v=" + views.ASSET_VERSION for name in PANEL_SCRIPT_NAMES]
 
 SEED_V1 = """# params_version: 1.0.0
@@ -926,7 +926,7 @@ class PanelShape(ToolsCase):
 
     def test_an_unknown_tool_is_refused_in_one_sentence(self):
         self.unlock()
-        for tool in ("review", "../x", "PANEL", "", "a" * 300):
+        for tool in ("reviews", "../x", "PANEL", "", "a" * 300):
             with self.subTest(tool=tool[:20]):
                 r = self.client.get("/voyager-tools/fragment", query_string={"tool": tool})
                 if tool == "":
@@ -1040,6 +1040,139 @@ class StandaloneHost(unittest.TestCase):
             with self.assertRaises(ValueError):
                 standalone_app.validate_port(bad)
         self.assertEqual(standalone_app.main(["--port", "5090"]), 2)
+
+
+
+class ReviewFragment(ToolsCase):
+    """The review fragment of one transect (program C milestone C6, spec 4.11) and the Review queue pane's parts."""
+
+    PSX = "MRS_T1_2023_2024.psx"
+
+    def make_job(self, folder=FOLDER):
+        """One job in the temporary store holding MRS T1 (two timepoints) under PSX; returns its id."""
+        rows = [{"readable_id": rid, "site": "MRS", "site_name": "", "transect": "T1", "processing_folder": folder,
+                 "shelf_location": f"{SHELF_PARENT}/{FOLDER}", "psx_basename": self.PSX}
+                for rid in (RID_WAIT_B, RID_WAIT_A)]
+        return self.jobs.create_job(rows, str(self.bench), "LO")["job_id"]
+
+    def get(self, job, psx):
+        return self.client.get("/voyager-tools/fragment", query_string={"tool": "review", "job": job, "psx": psx})
+
+    def test_the_payload_names_the_mount_its_assets_and_the_transect(self):
+        job = self.make_job()
+        self.unlock()
+        r = self.get(job, self.PSX)
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        payload = r.get_json()
+        self.assertEqual(payload["mount"], "VoyagerTools.mountReview")
+        self.assertEqual(payload["ui_style"], "voyager_tools_review")
+        self.assertEqual(payload["opts"], {"jobId": job, "psx": self.PSX})
+        self.assertEqual(payload["scripts"], ["/voyager-tools/static/" + name + "?v=" + views.ASSET_VERSION
+                                              for name in ("voyager_tools.js", "vt_uploads.js", "vt_review.js")])
+        self.assertEqual(payload["styles"], ["/voyager-tools/static/voyager_tools.css?v=" + views.ASSET_VERSION])
+        html = payload["html"]
+        self.assertTrue(html.startswith('<section class="voyager-tools vt-review" data-vt-base="/voyager-tools"'))
+        self.assertIn(f'data-job="{job}"', html)
+        self.assertIn(f'data-psx="{self.PSX}"', html)
+        self.assertIn('<span class="vt-site">Meri Shoal</span> <span class="id code">MRS</span>', html)
+        self.assertIn(f"{FOLDER}: {RID_WAIT_A}, {RID_WAIT_B}", html)  # registry order
+        self.assertIn('data-review-part="body"', html)
+        self.assertNotIn('id="vt-root"', html)
+
+    def test_a_site_the_table_cannot_name_stays_a_bare_code_with_a_tooltip(self):
+        job = self.make_job()
+        views.deps.site_name = lambda code: ""
+        self.unlock()
+        html = self.get(job, self.PSX).get_json()["html"]
+        self.assertIn('<span class="id code" title="The site table has no full name for MRS.">MRS</span>', html)
+
+    def test_outside_admin_mode_and_locked(self):
+        job = self.make_job()
+        r = self.get(job, self.PSX)
+        self.assertEqual(r.status_code, 401)
+        body = r.get_json()
+        self.assertTrue(body["need_unlock"] and body["admin_required"])
+        self.assertNotIn("scripts", body)
+        self.unlock()
+        self.locked = True
+        r = self.get(job, self.PSX)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual((r.get_json()["ui_style"], r.get_json()["locked"]), ("locked", True))
+
+    def test_malformed_and_unknown_values_are_refused_in_one_sentence(self):
+        job = self.make_job()
+        self.unlock()
+        cases = [("", self.PSX, 400), ("ME-2026", self.PSX, 400), ("../../etc/passwd", self.PSX, 400),
+                 (job.lower(), self.PSX, 400), (job + "\n", self.PSX, 400), (job, "", 400), (job, "../x.psx", 400),
+                 (job, "x.psx/", 400), (job, "x.PSX", 400), (job, "a\x00b.psx", 400), (job, "a" * 300 + ".psx", 400),
+                 (job, "MRS_T9_2023_2024.psx", 404), ("ME-20260101-000000-ZZ", self.PSX, 404)]
+        for job_value, psx, code in cases:
+            with self.subTest(job=job_value[:30], psx=psx[:30]):
+                r = self.get(job_value, psx)
+                self.assertEqual(r.status_code, code, r.get_data(as_text=True))
+                error = r.get_json()["error"]
+                self.assertTrue(error.endswith(".") and "\n" not in error, error)
+        r = self.client.get("/voyager-tools/fragment?tool=review")
+        self.assertEqual(r.status_code, 400)
+
+    def test_a_job_file_that_cannot_be_read_answers_500_naming_it(self):
+        job = self.make_job()
+        self.jobs.job_path(job).write_text("{not json", encoding="utf-8")
+        self.unlock()
+        r = self.get(job, self.PSX)
+        self.assertEqual(r.status_code, 500)
+        self.assertIn(job, r.get_json()["error"])
+
+    def test_the_head_escapes_hostile_values_from_the_job_file(self):
+        job = self.make_job()
+        path = self.jobs.job_path(job)
+        record = json.loads(path.read_text(encoding="utf-8"))
+        for row in record["rows"]:
+            row["processing_folder"] = '<img src=x onerror="alert(1)">'
+            row["site_name"] = "<script>alert(2)</script>"
+        path.write_text(json.dumps(record), encoding="utf-8")
+        self.unlock()
+        html = self.get(job, self.PSX).get_json()["html"]
+        self.assertNotIn("<img", html)
+        self.assertNotIn("<script>", html)
+        self.assertIn("&lt;img", html)
+
+    def test_the_fragment_is_read_only(self):
+        job = self.make_job()
+        before = self.jobs.job_path(job).read_bytes()
+        events = Path(self.registry.EVENTS_CSV).read_bytes()
+        self.unlock()
+        self.assertEqual(self.get(job, self.PSX).status_code, 200)
+        self.assertEqual(self.jobs.job_path(job).read_bytes(), before)
+        self.assertEqual(Path(self.registry.EVENTS_CSV).read_bytes(), events)
+
+    def test_the_manual_edit_module_missing_answers_503(self):
+        job = self.make_job()
+        self.unlock()
+
+        def missing():
+            raise ImportError("no manualedit here")
+        views.deps.job_store = missing
+        r = self.get(job, self.PSX)
+        self.assertEqual(r.status_code, 503)
+        self.assertTrue(r.get_json()["not_mounted"])
+
+    def test_fragment_payload_refuses_the_review_tool(self):
+        self.unlock()
+        with self.app.test_request_context():
+            with self.assertRaises(views.RequestError):
+                views.fragment_payload("review")
+
+    def test_the_review_queue_pane_carries_its_parts(self):
+        self.unlock()
+        page = self.client.get("/voyager-tools/").get_data(as_text=True)
+        pane = views.slice_section(page, '<section class="vt-pane" id="vt-review"')
+        for hook in ("review-meta", "review-items", "review-stopped", "review-stopped-wrap", "review-returnable",
+                     "review-returnable-wrap", "review-unmatched", "review-area", "review-result", "review-refresh"):
+            with self.subTest(hook=hook):
+                self.assertIn(f'data-vt="{hook}"', pane)
+        self.assertEqual(pane.count("btn-primary"), 0)
+        self.assertIn("vt_review.js", page)
 
 
 if __name__ == "__main__":

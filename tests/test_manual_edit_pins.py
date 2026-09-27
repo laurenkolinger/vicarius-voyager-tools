@@ -212,8 +212,8 @@ class TimelinesHelpers(unittest.TestCase):
     def test_state_roles(self):
         out = run_node(TIMELINES_JS, "return ['todo','editing','review','upload','uploading','restarting','done','odd']"
                                      ".map(h.stateRole);")
-        self.assertEqual(out, ["role-empty", "role-in-progress", "role-attention", "role-planned", "role-in-progress",
-                               "role-in-progress", "role-verified", "role-empty"])
+        self.assertEqual(out, ["stage-bench", "stage-bench", "stage-review", "stage-upload", "stage-upload",
+                               "stage-bench", "stage-edited", "role-empty"])
 
     def test_filters_from_storage_are_validated(self):
         out = run_node(TIMELINES_JS, "return [h.cleanFilters({job: 'ME-20260925-100000-CC', state: 'review',"

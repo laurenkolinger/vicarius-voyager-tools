@@ -5,8 +5,9 @@
            of docs/superpowers/specs/2026-09-02-workflow-page-design.md and
            2026-09-02-matrix-window-design.md): a grouped list of panes at the
            left (Records, Manual edit, Voyager, Desktop, History) and one pane
-           each. The eight tools live here; the Uploads and Timelines panes are in
-           panes_manual_edit.html (static/vt_uploads.js, static/vt_timelines.js)
+           each. The eight tools live here; the Review queue, Uploads and Timelines
+           panes are in panes_manual_edit.html (static/vt_review.js,
+           static/vt_uploads.js, static/vt_timelines.js)
            and the settings and desktop panes in panes_settings.html, filled
            by static/vt_settings.js. Var-free: the desktop
            window and the standalone page include the same markup, and
@@ -22,7 +23,7 @@
            vicarius_roles.css; every other rule is page-specific, scoped
            under .voyager-tools in static/voyager_tools.css.
 #}
-<section class="voyager-tools" id="vt-root" data-vt-base="/voyager-tools" data-vt-version="20260927g">
+<section class="voyager-tools" id="vt-root" data-vt-base="/voyager-tools" data-vt-version="20260927j">
 
   <header class="head">
     <h1 class="title" id="vt-title">Atlas control panel</h1>
@@ -46,6 +47,7 @@
       <button type="button" class="vt-tab" role="tab" data-vt-tab="seasons" aria-controls="vt-seasons" aria-selected="false" title="Show the camera model, preprocessing and notes recorded for every season, and edit them.">Camera model</button>
       <button type="button" class="vt-tab" role="tab" data-vt-tab="prompts" aria-controls="vt-prompts" aria-selected="false" title="Show the back-of-house guide to cataloguing a season and the prompts to give an agent.">Prompts doc</button>
       <p class="vt-nav-group" role="presentation">Manual edit</p>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="review" aria-controls="vt-review" aria-selected="false" title="Show every transect waiting for an admin decision across the manual edit projects, and open one to decide it.">Review queue</button>
       <button type="button" class="vt-tab" role="tab" data-vt-tab="uploads" aria-controls="vt-uploads" aria-selected="false" title="Show every transect marked for re-upload across the manual edit projects, start one upload set, and watch the running ones.">Uploads</button>
       <button type="button" class="vt-tab" role="tab" data-vt-tab="timelines" aria-controls="vt-timelines" aria-selected="false" title="Show how long each transect of every manual edit project spent at each step, and what is running now.">Timelines</button>
       <button type="button" class="vt-tab" role="tab" data-vt-tab="settings" aria-controls="vt-settings" aria-selected="false" title="Show the manual edit limits, the markers per chunk, the edit bench default and the open and close logging, and change them.">Manual edit settings</button>

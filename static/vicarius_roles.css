@@ -40,7 +40,17 @@
    4.9:1); light --text ink fails badly on all five (2.0 to 2.8:1), so one
    rule (dark ink on every fill) is what actually holds the floor, and it
    is the only choice that also keeps the three visually lightest fills
-   (needs attention, done by machine, done by person) readable. */
+   (needs attention, done by machine, done by person) readable.
+
+   Manual edit stage chips (end of file): not roles but the atlas matrix's
+   stage colours for a transect's manual edit (on the edit bench, admin
+   review, marked for upload, uploaded), decided with the atlas lifecycle
+   (docs/superpowers/specs/2026-09-26-chain-a-lifecycle-record-design.md,
+   the three rules per new stage). The three stage tokens live here, on
+   :root, so the atlas (static/atlas.css) and every page showing a manual
+   edit state (the Atlas control panel's Review queue and review content,
+   its Timelines) read one definition, and a state chip matches the matrix
+   beside it. A change of hue goes through that spec, not this file. */
 
 /* -- Chips: 12 px swatches, the legend and inline-label size ---------- */
 .chip.role-empty,
@@ -167,3 +177,32 @@ tr.role-verified td { background: rgba(177, 89, 207, 0.08); }
   font-size: 12px;
   color: var(--text, #F5EDF0);
 }
+
+/* -- Manual edit stage chips: the atlas matrix's stage colours -------- */
+:root {
+  --stage-review: #A56BFF;  /* admin review */
+  --stage-upload: #9BD13A;  /* marked for upload */
+  --stage-edited: #4bbf73;  /* uploaded and verified */
+}
+/* The atlas legend (a .role-legend list, static/atlas.js stageLegendHtml) draws
+   every stage as the same wide bar and fills it itself (static/atlas.css), so
+   these swatch rules leave any chip inside a legend alone. */
+.chip.stage-bench:not(.role-legend .chip),
+.chip.stage-review:not(.role-legend .chip),
+.chip.stage-upload:not(.role-legend .chip),
+.chip.stage-edited:not(.role-legend .chip) {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  margin: 0;
+  border-radius: var(--radius, 2px);
+  vertical-align: middle;
+  flex: none;
+}
+/* on the edit bench (registry status editing): the shared magenta, filled as the atlas legend fills it. */
+.chip.stage-bench:not(.role-legend .chip) { background: var(--magenta, #E20074); border: 1px solid var(--magenta, #E20074); }
+.chip.stage-review:not(.role-legend .chip) { background: var(--stage-review); border: 1px solid var(--stage-review); }
+.chip.stage-upload:not(.role-legend .chip) { background: var(--stage-upload); border: 1px solid var(--stage-upload); }
+.chip.stage-edited:not(.role-legend .chip) { background: var(--stage-edited); border: 1px solid var(--stage-edited); }

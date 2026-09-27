@@ -45,8 +45,10 @@
   // The summary's phrase per transect state, admin review first (attention before the rest).
   var SUMMARY_PHRASES = [["review", "in admin review"], ["restarting", "starting over"], ["upload", "marked for re-upload"],
                          ["uploading", "uploading"], ["editing", "editing"], ["todo", "not opened"], ["done", "uploaded"]];
-  var STATE_ROLES = { todo: "role-empty", editing: "role-in-progress", review: "role-attention", upload: "role-planned",
-                      uploading: "role-in-progress", restarting: "role-in-progress", done: "role-verified" };
+  // The chip of each transect state: the atlas matrix colour of the registry status it writes (the shared
+  // stage chips of static/vicarius_roles.css); static/vt_review.js uses the same map.
+  var STATE_ROLES = { todo: "stage-bench", editing: "stage-bench", review: "stage-review", upload: "stage-upload",
+                      uploading: "stage-upload", restarting: "stage-bench", done: "stage-edited" };
   // The upload item states of the editor's progress window (manual_edit_upload.js ITEM_WORDS).
   var ITEM_WORDS = { waiting: "Waiting to upload", checking_hold: "Checking Metashape", exporting_report: "Exporting the report",
                      rendering_series: "Rendering the time series", checking_space: "Checking space",
@@ -57,8 +59,9 @@
   // The registry manual edit statuses as the drawer names them.
   var STATUS_WORDS = { "": "no manual edit", awaiting: "awaiting edit", editing: "editing", review: "in admin review",
                        upload: "marked for upload", done: "uploaded and verified" };
-  var STATUS_ROLES = { "": "role-empty", awaiting: "role-planned", editing: "role-in-progress", review: "role-attention",
-                       upload: "role-planned", done: "role-verified" };
+  // The registry statuses in the atlas matrix colours: awaiting is the matrix's amber (role-attention).
+  var STATUS_ROLES = { "": "role-empty", awaiting: "role-attention", editing: "stage-bench", review: "stage-review",
+                       upload: "stage-upload", done: "stage-edited" };
   var NOTE_WORDS = { editor_explanation: "Editor's explanation", check_note: "Check note", admin_review: "Admin review",
                      return_instructions: "Instructions to the editor", restart: "Start over", rescale: "Rescale" };
   var DECISION_WORDS = { upload: "marked for upload", "return": "sent back", restart: "started over" };
@@ -175,7 +178,7 @@
     return pct === null ? "" : "Pulling to the edit bench, " + pct + " percent";
   }
 
-  // stateRole(state): a transect state on the matrix design's roles.
+  // stateRole(state): a transect state in the atlas matrix's stage colours.
   function stateRole(state) { return STATE_ROLES[state] || "role-empty"; }
 
   // phaseWords(phase): a project phase in words; failed_pulling reads "failed while pulling".

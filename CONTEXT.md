@@ -11,7 +11,7 @@ The name people see for this module since 2026-09-27: the one window holding the
 _Avoid_: Voyager tools (the old display name), admin page, admin gated settings
 
 **Pane**:
-One entry of the panel's grouped list (Records, Manual edit, Voyager, Desktop, History) and what it shows. The eight tools are panes; so are Uploads and Timelines, the settings panes, the read-only desktop panes and the Settings history.
+One entry of the panel's grouped list (Records, Manual edit, Voyager, Desktop, History) and what it shows. The eight tools are panes; so are Review queue, Uploads and Timelines, the settings panes, the read-only desktop panes and the Settings history.
 _Avoid_: tab, panel (the panel is the whole window)
 
 **Tool**:
@@ -30,6 +30,10 @@ _Avoid_: batch (a batch is a driver's group of Voyager turns), upload job
 **Timeline**:
 How long one transect of one manual edit project spent at each step, read in the Timelines pane: pulled to the edit bench, editing, open in Metashape, in admin review, waiting for upload, uploaded. The registry status times come from the status changes in `events.csv` (the registry library's `state_intervals`, the time each status lasted) inside the project's window, from its creation to the creation of the next project holding the same transect; the Metashape time comes from the transect's open and close events; nothing is a stored counter.
 _Avoid_: history (the settings history is another thing), log
+
+**Review content**:
+Everything an admin reads and does to decide one transect in admin review: the manual edit module's review record, Open in Metashape and the decision with its report. One fragment serves it to the atlas's admin review sidecar and to the Review queue pane.
+_Avoid_: dossier (the manual edit module's route name, not a word for people), review pane (the atlas's interim pane this replaced)
 
 **Drift**:
 A setting whose value in its file differs from the last value the settings history holds for it, because the file changed outside the write path. The pane names it and **Record as found** writes the missing line with the typed initials and a reason.

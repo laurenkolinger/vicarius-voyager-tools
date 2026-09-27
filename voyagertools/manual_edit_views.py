@@ -2,29 +2,37 @@
 """
 Module: voyagertools/manual_edit_views.py
 Purpose: The manual edit routes of the Atlas control panel (program C spec
-         section 5.3): the Timelines pane's GET /voyager-tools/api/timelines
-         and /voyager-tools/api/timelines/detail (milestone C8, spec 4.12),
-         registered on the same blueprint as views.py, which imports this
-         module at its end. Both routes read: the job records through
-         the manual edit job store, program A's status intervals and notes
-         through the registry library, program B's edit time through
-         manualedit.jobstore.edit_time. The Uploads pane (milestone C7)
-         needs no route here: it reads and starts uploads through program
-         B's own /manual-edit/api routes.
+         section 5.3), registered on the same blueprint as views.py, which
+         imports this module at its end: the Timelines pane's
+         GET /voyager-tools/api/timelines and /voyager-tools/api/timelines/detail
+         (milestone C8, spec 4.12); the Review queue pane's
+         GET /voyager-tools/api/review/queue (milestone C6, spec 4.10); and
+         the review fragment, review_fragment_payload, which the fragment
+         route of views.py answers for ?tool=review (spec 4.11). Every route
+         reads: the job records through the manual edit job store, program
+         A's status intervals and notes through the registry library,
+         program B's edit time through manualedit.jobstore.edit_time. The
+         review content itself (static/vt_review.js) reads program B's
+         dossier and posts its open, review and back-to-review routes; the
+         Uploads pane (milestone C7) reads and starts uploads through
+         program B's own /manual-edit/api routes.
 Inputs:  HTTP GET requests with optional filters; deps.job_store(),
-         deps.registry(), deps.site_name, deps.now_iso, deps.recover_uploads.
-Outputs: JSON. The only write is the manual edit module's recovery of
-         upload sets a desktop restart stranded (deps.recover_uploads).
+         deps.active_jobs(), deps.registry(), deps.site_name, deps.now_iso,
+         deps.recover_uploads, deps.recover_restarts.
+Outputs: JSON. The only writes are the manual edit module's recoveries of
+         upload sets and start overs a desktop restart stranded
+         (deps.recover_uploads, deps.recover_restarts).
 """
 from __future__ import annotations
 
+import importlib
 import re
 from collections.abc import Mapping
 from datetime import date, datetime
 
-from flask import current_app, jsonify, request
+from flask import current_app, jsonify, render_template, request
 
-from . import timelines
+from . import review_queue, timelines
 from . import views
 from .views import RequestError, guarded, voyager_tools_bp
 
@@ -39,6 +47,15 @@ LINE_BAD_JOB = "Name the manual edit project by its id, ME-YYYYMMDD-HHMMSS-initi
 LINE_BAD_EDITOR = "Give the editor as initials of two to four letters."
 LINE_BAD_PSX = "Name the transect by its Metashape project file, for example MRS_T2_2023_2025.psx."
 LINE_UNKNOWN_JOB = "No manual edit project {job_id} is recorded."
+LINE_UNKNOWN_TRANSECT = "{psx} is not a transect of manual edit project {job_id}."
+LINE_UNREADABLE_JOB = "The manual edit project {job_id} cannot be read: {error}"
+LINE_QUEUE_UNREADABLE = ("The manual edit project {job_ids} cannot be read, so the Review queue lists nothing; "
+                         "open Clean manual edit run to see it.")
+REVIEW_TEMPLATE = "voyager_tools/review.html"
+# A job id as it appears inside a job store error (a file name or a sentence);
+# each candidate is then checked whole against the job store's own pattern.
+JOB_ID_CANDIDATE = re.compile(r"ME-[0-9A-Za-z-]+")
+MANUAL_EDIT_VIEWS_MODULE = "manualedit.views"
 
 
 # --- helpers -----------------------------------------------------------------
@@ -84,6 +101,24 @@ def _filters(args: Mapping, jobstore_module) -> dict:
         except ValueError as exc:
             raise RequestError(LINE_BAD_SINCE) from exc
     return {"job": job, "state": state, "editor": editor, "since": since}
+
+
+def _job_and_psx(job_value, psx_value, jobstore_module) -> tuple[str, str]:
+    """A manual edit project id and a transect's psx from a query, both validated whole, as given.
+
+    Nothing is trimmed: a value with a space or a line end around it is
+    malformed, since no job file or psx carries one.
+
+    Raises:
+        RequestError: 400 naming the value that does not parse.
+    """
+    job_id = job_value if isinstance(job_value, str) else ""
+    psx = psx_value if isinstance(psx_value, str) else ""
+    if not jobstore_module.JOB_ID_PATTERN.fullmatch(job_id):
+        raise RequestError(LINE_BAD_JOB)
+    if len(psx) > MAX_PSX_CHARS or not jobstore_module.PSX_BASENAME_PATTERN.fullmatch(psx):
+        raise RequestError(LINE_BAD_PSX)
+    return job_id, psx
 
 
 def _jobs(store, jobstore_module) -> tuple[list[dict], list[dict]]:
@@ -157,22 +192,120 @@ def api_timelines_detail():
     400 for a malformed job or psx, 404 for a job or psx that is not recorded.
     """
     store, jsm = _manual_edit()
-    job_id = str(request.args.get("job") or "").strip()
-    psx = str(request.args.get("psx") or "").strip()
-    if not jsm.JOB_ID_PATTERN.fullmatch(job_id):
-        raise RequestError(LINE_BAD_JOB)
-    if len(psx) > MAX_PSX_CHARS or not jsm.PSX_BASENAME_PATTERN.fullmatch(psx):
-        raise RequestError(LINE_BAD_PSX)
+    job_id, psx = _job_and_psx(request.args.get("job"), request.args.get("psx"), jsm)
     jobs, _skipped = _jobs(store, jsm)
     job = next((j for j in jobs if j.get("job_id") == job_id), None)
     if job is None:
         raise RequestError(LINE_UNKNOWN_JOB.format(job_id=job_id), views.HTTP_NOT_FOUND)
     transect = next((t for t in timelines.transects_of(job, str, views.deps.site_name) if t["psx"] == psx), None)
     if transect is None:
-        raise RequestError(f"{psx} is not a transect of manual edit project {job_id}.", views.HTTP_NOT_FOUND)
+        raise RequestError(LINE_UNKNOWN_TRANSECT.format(psx=psx, job_id=job_id), views.HTTP_NOT_FOUND)
     registry = views.deps.registry()
     now = _now()
     intervals = _read_registry(lambda: timelines._intervals_many(registry, transect["readable_ids"], now))
     notes = _read_registry(lambda: timelines._notes(registry))
     until = timelines.windows(jobs).get((job_id, transect["processing_folder"]))
     return jsonify(timelines.detail(job, psx, intervals, notes, timelines.parse_time(job.get("created_at")), until))
+
+
+# --- the Review queue and the review fragment (milestone C6) ------------------------
+
+def _queue_rules(jobstore_module) -> review_queue.QueueRules:
+    """The transect rules the queue applies, from the manual edit job store (the ones its dossier uses)."""
+    return review_queue.QueueRules(stopped=jobstore_module.restart_stopped,
+                                   returnable=jobstore_module.can_return_to_review)
+
+
+@voyager_tools_bp.route("/api/review/queue", methods=["GET"])
+@guarded
+def api_review_queue():
+    """The Review queue payload (spec 4.10): {items, stopped_restarts, marked_for_upload, unmatched, read_at}.
+
+    Every unfinished project is read strictly, so a job file that cannot be
+    read answers 500 with its sentence instead of calling a row it may hold
+    unmatched. Before the lists are built the manual edit module's own
+    recovery marks every start over a desktop restart stranded as stopped
+    (the step its dossier route takes), so it lists under Start over stopped.
+    """
+    _store, jsm = _manual_edit()
+    jobs = views.deps.recover_restarts(_queue_jobs(jsm))
+    registry = views.deps.registry()
+    rows = _read_registry(registry.load)
+    payload = review_queue.queue_items(rows, jobs, views.deps.site_name, sort_key=registry.sort_key,
+                                       status_review=registry.ME_REVIEW, rules=_queue_rules(jsm))
+    payload["read_at"] = views.deps.now_iso()
+    return jsonify(payload)
+
+
+def _queue_jobs(jobstore_module) -> list[dict]:
+    """Every unfinished job record, read strictly; an unreadable one is a 500 naming its project id, not its path.
+
+    The full error (with the file path) goes to the desktop log; the pane
+    shows one line naming the project and where to look at it.
+
+    Raises:
+        RequestError: 500 in one sentence.
+    """
+    try:
+        return [job for job in views.deps.active_jobs() if isinstance(job, Mapping)]
+    except Exception as exc:  # noqa: BLE001  (the store's own error classes all mean: fix the file)
+        current_app.logger.warning("voyager tools: the Review queue could not read the job files: %s", exc)
+        job_ids = sorted({token for token in JOB_ID_CANDIDATE.findall(str(exc))
+                          if jobstore_module.JOB_ID_PATTERN.fullmatch(token)})
+        line = (LINE_QUEUE_UNREADABLE.format(job_ids=" and ".join(job_ids)) if job_ids
+                else f"The manual edit job files cannot be read: {exc}")
+        raise RequestError(line, views.HTTP_SERVER_ERROR) from exc
+
+
+def _manual_edit_asset_version() -> str:
+    """The manual edit module's asset version (the upload window's cache bust), "" when it cannot be read."""
+    try:
+        return str(getattr(importlib.import_module(MANUAL_EDIT_VIEWS_MODULE), "ASSET_VERSION", "") or "")
+    except ImportError:
+        return ""
+
+
+def _review_job(store, jobstore_module, job_id: str) -> dict:
+    """The job record of a review fragment; 404 for an unknown project, 500 for a file that cannot be read."""
+    try:
+        return store.load_job(job_id)
+    except jobstore_module.JobNotFound as exc:
+        raise RequestError(LINE_UNKNOWN_JOB.format(job_id=job_id), views.HTTP_NOT_FOUND) from exc
+    except (jobstore_module.JobStoreError, OSError, ValueError, TypeError) as exc:
+        raise RequestError(LINE_UNREADABLE_JOB.format(job_id=job_id, error=exc), views.HTTP_SERVER_ERROR) from exc
+
+
+def review_fragment_payload(job_value, psx_value) -> dict:
+    """The review fragment of one transect (spec 4.11): the atlas's review sidecar and the Review queue pane mount it.
+
+    Parameters:
+        job_value, psx_value: the ?job= and ?psx= values as given.
+
+    Returns:
+        The lock or admin payload of views.gate_payload when either gate
+        stops it; otherwise {ui_style, locked, base, html, scripts, styles,
+        mount, opts, module}, the html being templates/voyager_tools/review.html
+        with the transect's head (psx, site full name and code, transect,
+        readable ids) rendered and escaped, and the transect's Shelf folder
+        and the manual edit asset version as data attributes.
+
+    Raises:
+        RequestError: 400 a malformed job or psx, 404 an unknown project or
+            a psx it does not hold, 500 a job file that cannot be read, 503
+            the manual edit module not mounted.
+    """
+    gate = views.gate_payload()
+    if gate is not None:
+        return gate
+    store, jsm = _manual_edit()
+    job_id, psx = _job_and_psx(job_value, psx_value, jsm)
+    job = _review_job(store, jsm, job_id)
+    transect = review_queue.transect_of(job, psx, views.deps.site_name, views.deps.registry().sort_key)
+    if transect is None:
+        raise RequestError(LINE_UNKNOWN_TRANSECT.format(psx=psx, job_id=job_id), views.HTTP_NOT_FOUND)
+    html = render_template(REVIEW_TEMPLATE, base=views.URL_PREFIX, v=views.ASSET_VERSION,
+                           manual_edit_version=_manual_edit_asset_version(), job_id=job_id, **transect).strip()
+    return {"ui_style": views.UI_STYLE_REVIEW, "locked": False, "base": views.URL_PREFIX, "html": html,
+            "scripts": views.asset_urls(views.REVIEW_SCRIPTS), "styles": views.asset_urls((views.STATIC_CSS,)),
+            "mount": views.MOUNT_REVIEW, "opts": {"jobId": job_id, "psx": psx},
+            "module": {"name": views.MODULE_SLUG, "display_name": views.DISPLAY_NAME}}
