@@ -797,7 +797,7 @@
       confirmDialog({
         title: "Cancel and prune the manual edit project",
         lines: ["Cancel project " + jobId + " with " + rows + " row" + (rows === "1" ? "" : "s") + ".",
-                "VICARIUS returns each row still at editing to awaiting with its Shelf location, leaves a row at review, upload or done as it is, and removes the edit bench copies when the project never reached the push."],
+                "VICARIUS returns each row still at editing to awaiting with its Shelf location, leaves a row at done as it is, and removes the edit bench copies when the project never reached the push."],
         okLabel: "Cancel and prune"
       }).then(function (ok) {
         if (!ok) return;
@@ -831,7 +831,7 @@
           if (!res.ok) { fail(resultEl, res); return; }
           var rows = res.data.rows;
           select.innerHTML = rows.map(function (r) {
-            var note = r.in_job ? " (in a manual edit project)" : (!r.local ? " (on the NAS)" : "") + (r.run_state === "running" ? " (running)" : "");
+            var note = r.in_job ? " (in a manual edit project)" : r.manual_edit_under_way ? " (manual edit under way)" : (!r.local ? " (on the NAS)" : "") + (r.run_state === "running" ? " (running)" : "");
             var label = r.readable_id + "  " + (r.site_name || r.site) + " " + r.transect + " " + r.year + (r.season_token === "_pbl" ? " spring" : " annual") + "  " + (r.step1_status || r.stage || "started") + note;
             return '<option value="' + esc(r.readable_id) + '">' + esc(label) + "</option>";
           }).join("") || '<option value="">No row has been touched by Voyager 1 yet</option>';

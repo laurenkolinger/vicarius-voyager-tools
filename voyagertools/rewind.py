@@ -84,7 +84,7 @@ STATUS_STEP0_CELLS = {
 }
 INACTIVE_STAGES = ("", "done", "failed")
 # The registry's named reset for a rewind (a key of registry.MANUAL_EDIT_RESETS);
-# the upsert guard of milestone A1g checks the move against it.
+# the registry's upsert status guard (MANUAL_EDIT_UPSERT_GUARD) checks the move against it.
 REWIND_RESET = "rewind"
 SPOT_REDO_SECTION = "voyager1"
 SPOT_REDO_KEY = "spot_redo"
@@ -152,14 +152,19 @@ def status_refusal(row: Mapping, registry_mod) -> str:
     registry_mod.MANUAL_EDIT_STATUSES is a hand-typed cell that needs the
     atlas repair first. Both are refused before anything moves, because the
     registry's rewind reset would refuse the write after the chunk is gone.
+
+    The decision reads the raw stored cell, exactly as the registry's upsert
+    status guard (registry.MANUAL_EDIT_UPSERT_GUARD) does, so a hand-padded
+    value such as " done " is refused here rather than by the registry write
+    that follows the chunk removal. Only the in-flight message strips the
+    cell, so " editing " still reads as a row on the bench.
     """
     rid = str(row.get("readable_id") or "")
-    status = str(row.get(registry_mod.MANUAL_EDIT_STATUS_COLUMN) or "").strip()
-    if status in registry_mod.MANUAL_EDIT_IN_FLIGHT:
+    raw = str(row.get(registry_mod.MANUAL_EDIT_STATUS_COLUMN) or "")
+    if raw.strip() in registry_mod.MANUAL_EDIT_IN_FLIGHT:
         return f"{rid} is on the edit bench in a manual edit project; decide or cancel that project first."
-    sources, _targets = registry_mod.MANUAL_EDIT_RESETS[REWIND_RESET]
-    if status not in sources:
-        return (f"{rid} holds the manual edit status {status!r}, which VICARIUS does not know; "
+    if not registry_mod.manual_edit_reset_allowed(REWIND_RESET, raw, registry_mod.ME_BLANK):
+        return (f"{rid} holds the manual edit status {raw!r}, which VICARIUS does not know; "
                 f"repair it from the atlas in admin mode first.")
     return ""
 

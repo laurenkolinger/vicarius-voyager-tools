@@ -473,7 +473,8 @@ class ManualEditRoutes(ToolsCase):
         job, local = self.make_job()
         self.jobs.transition(job["job_id"], "pulling", "LO")
         self.jobs.transition(job["job_id"], "editing", "LO")
-        for bad in (None, "", "   ", 7, ["x"], "x" * 200):
+        for bad in (None, "", "   ", 7, ["x"], "x" * 200, "ME-2026-01-LO", "../" + job["job_id"],
+                    "ME-20260101-000000-" + "A" * 40):
             with self.subTest(job_id=bad):
                 r = self.cancel(**({} if bad is None else {"job_id": bad}))
                 self.assertEqual(r.status_code, 400)
@@ -634,9 +635,13 @@ class RewindRoutes(ToolsCase):
 
     def test_a_row_after_the_pull_is_refused_even_with_no_project_listed(self):
         self.unlock()
+        rows = self.client.get("/voyager-tools/api/rewind/rows").get_json()["rows"]
+        self.assertFalse(rows[0]["manual_edit_under_way"])
         for status in ("editing", "review", "upload"):
             with self.subTest(status=status):
                 self.registry.upsert(RID_DONE, {"manual_edit_status": status}, "seed")
+                rows = self.client.get("/voyager-tools/api/rewind/rows").get_json()["rows"]
+                self.assertTrue(rows[0]["manual_edit_under_way"])
                 for route in ("/voyager-tools/api/rewind/plan", "/voyager-tools/api/rewind/apply",
                               "/voyager-tools/api/spot-redo"):
                     r = self.client.post(route, json={"readable_id": RID_DONE, "initials": "LO", "confirm": True})
@@ -644,6 +649,25 @@ class RewindRoutes(ToolsCase):
                     self.assertIn("on the edit bench in a manual edit project", r.get_json()["error"])
                 self.assertEqual(json.loads(self.psx.read_text())["chunks"], [RID_DONE])
                 self.assertEqual(self.registry.get(RID_DONE)["step1_status"], "complete")
+
+
+    def test_an_unreadable_job_store_stops_the_rewind_but_not_the_lists(self):
+        """Without the job store the project guard is unknown, so plan, apply and spot redo answer 500;
+        the row list and the state still load, with no row marked as in a project."""
+        self.unlock()
+        (self.reg_root / "manual_edit").mkdir()
+        (self.reg_root / "manual_edit" / "current.json").write_text("{not json")
+        for route in ("/voyager-tools/api/rewind/plan", "/voyager-tools/api/rewind/apply",
+                      "/voyager-tools/api/spot-redo"):
+            r = self.client.post(route, json={"readable_id": RID_DONE, "initials": "LO", "confirm": True})
+            self.assertEqual(r.status_code, 500, route)
+            self.assertIn("cannot be read", r.get_json()["error"])
+        self.assertEqual(json.loads(self.psx.read_text())["chunks"], [RID_DONE])
+        self.assertEqual(self.registry.get(RID_DONE)["step1_status"], "complete")
+        r = self.client.get("/voyager-tools/api/rewind/rows")
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.get_json()["rows"][0]["in_job"])
+        self.assertEqual(self.client.get("/voyager-tools/api/state").status_code, 200)
 
 
 class PromptsRoutes(ToolsCase):

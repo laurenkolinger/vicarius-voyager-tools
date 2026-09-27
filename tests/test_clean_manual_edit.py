@@ -351,6 +351,52 @@ class WithStores(unittest.TestCase):
                 self.assertEqual(Path(self.root, "events.csv").read_text(), before)
                 self.assertEqual(self.store.load_job(self.job["job_id"])["phase"], "editing")
 
+    def test_a_status_vicarius_does_not_know_refuses_the_cancel_under_the_upsert_guard(self):
+        """The upsert guard compares the raw cell, so a padded " editing " would fail the restore write
+        partway; the cancel refuses it before anything is written or removed."""
+        self.registry.MANUAL_EDIT_UPSERT_GUARD = True
+        self.advance("pulling", "editing")
+        for value in (" editing ", "Reviewed", " awaiting", " "):
+            with self.subTest(value=value):
+                self._write_raw_status(value)
+                before = Path(self.root, "events.csv").read_text()
+                with self.assertRaises(cme.CancelRefused) as caught:
+                    cme.cancel_and_prune(self.store, self.registry, self.job["job_id"], "LO")
+                self.assertEqual(str(caught.exception),
+                                 f"{RID} holds the manual edit status {value!r}, which VICARIUS does not know; "
+                                 f"repair it from the atlas in admin mode first.")
+                self.assertTrue(os.path.exists(self.local))
+                self.assertEqual(self.registry.get(RID)["manual_edit_status"], value)
+                self.assertEqual(Path(self.root, "events.csv").read_text(), before)
+                self.assertEqual(self.store.load_job(self.job["job_id"])["phase"], "editing")
+                summary = cme.summarise(self.store.load_job(self.job["job_id"]), registry_mod=self.registry)
+                self.assertFalse(summary["can_cancel"])
+
+    def test_restore_leaves_a_padded_editing_cell_alone_under_the_upsert_guard(self):
+        self.registry.MANUAL_EDIT_UPSERT_GUARD = True
+        self._write_raw_status(" editing ")
+        result = cme.restore_registry(self.job, self.registry, "voyager_tools:LO")[0]
+        self.assertFalse(result["status_reset"])
+        self.assertFalse(result["location_restored"])
+        self.assertEqual(result["status_kept"], " editing ")
+        self.assertEqual(self.registry.get(RID)["manual_edit_status"], " editing ")
+
+    def test_restore_moves_the_location_of_an_awaiting_row_only_off_the_bench(self):
+        """A blank or awaiting row keeps its status; its location is restored only when it points at the
+        edit bench copy the prune removes, never over a value someone else wrote."""
+        elsewhere = f"{HOST}:/volume6/Archive8_12TB/driver_deposits/run2/{FOLDER}"
+        for status in self.registry.MANUAL_EDIT_VOYAGER1_ELIGIBLE:
+            with self.subTest(status=status):
+                self.registry.upsert(RID, {"processing_location": elsewhere}, "seed")
+                self._write_raw_status(status)
+                result = cme.restore_registry(self.job, self.registry, "voyager_tools:LO")[0]
+                self.assertFalse(result["location_restored"])
+                self.assertEqual(self.registry.get(RID)["processing_location"], elsewhere)
+                self.registry.upsert(RID, {"processing_location": self.local + "/"}, "seed")
+                result = cme.restore_registry(self.job, self.registry, "voyager_tools:LO")[0]
+                self.assertTrue(result["location_restored"])
+                self.assertEqual(self.registry.get(RID)["processing_location"], f"{SHELF_PARENT}/{FOLDER}")
+
     def test_summarise_names_the_registry_refusal_when_given_the_registry(self):
         self._write_raw_status("review")
         summary = cme.summarise(self.store.load_job(self.job["job_id"]), registry_mod=self.registry)

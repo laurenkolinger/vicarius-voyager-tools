@@ -2,14 +2,14 @@
 """
 Module: voyagertools/clean_manual_edit.py
 Purpose: The clean manual edit run tool (program spec section 7, tool 3;
-         chain program C section 5.3, milestone C3a): summarise every
-         unfinished manual edit project and, on a confirmed cancel of one,
-         mark it cancelled, remove the edit bench copy when the job never
-         reached the push to the Shelf, and put its registry rows back:
-         a row still at editing returns to awaiting with its Shelf location
-         through the registry's named reset clean_manual_edit; a row at
-         blank or awaiting gets its Shelf location back and keeps its
-         status; any other status is left as it is and reported.
+         chain program C section 5.3): summarise every unfinished manual
+         edit project and, on a confirmed cancel of one, mark it cancelled,
+         remove the edit bench copy when the job never reached the push to
+         the Shelf, and put its registry rows back: a row still at editing
+         returns to awaiting with its Shelf location through the registry's
+         named reset clean_manual_edit; a row at blank or awaiting keeps its
+         status and gets its Shelf location back when its location points at
+         the edit bench; any other status is left as it is and reported.
 Inputs:  a manualedit.jobstore.JobStore, the registry library (its manual
          edit vocabulary: MANUAL_EDIT_STATUSES and the derived tuples), the
          operator's initials, an rmtree function.
@@ -19,9 +19,12 @@ Outputs: a plain summary for the page and the cancel result; registry cells
          cancelled (which clears current.json).
 
 Refusals: a finished job; a transfer or checks step in flight; a transect
-program B's job record holds in a certified state (review, upload,
+the manual edit job record holds in a certified state (review, upload,
 uploading, restarting); a row of the job the registry records at review or
-upload. Each refusal comes before anything is written or removed.
+upload, or at a value outside the manual edit statuses (a hand-typed or
+padded cell, which the registry's upsert status guard would refuse partway
+through the restore). Each refusal comes before anything is written or
+removed.
 """
 from __future__ import annotations
 
@@ -49,9 +52,9 @@ PHASE_CANCELLED = "cancelled"
 FAILED_PREFIX = "failed_"
 IN_FLIGHT_PHASES = (PHASE_PULLING, PHASE_CHECKING, PHASE_PUSHING, PHASE_VERIFYING)
 TERMINAL_PHASES = (PHASE_DONE, PHASE_CANCELLED)
-# Program B's per-transect states in which the bench copy holds a certified
-# edit the Shelf does not have yet (chain program B section 4.1); mirrored like
-# the phases above and pinned to manualedit.jobstore by the suite.
+# The manual edit job record's per-transect states in which the bench copy
+# holds a certified edit the Shelf does not have yet (chain program B section
+# 4.1); mirrored like the phases above and pinned to manualedit.jobstore by the suite.
 CERTIFIED_PROJECT_STATES = ("review", "upload", "uploading", "restarting")
 # Once a job reached any of these, edited projects may already sit on the
 # Shelf, so the local copy is kept as the only complete record.
@@ -59,7 +62,8 @@ PUSH_PHASES = (PHASE_PUSHING, PHASE_VERIFYING, PHASE_DONE,
                FAILED_PREFIX + PHASE_PUSHING, FAILED_PREFIX + PHASE_VERIFYING)
 
 # The registry's named reset for this tool (a key of registry.MANUAL_EDIT_RESETS:
-# editing to awaiting only); the upsert guard of milestone A1g checks it.
+# editing to awaiting only); the registry's upsert status guard
+# (MANUAL_EDIT_UPSERT_GUARD) checks it.
 CLEAN_MANUAL_EDIT_RESET = "clean_manual_edit"
 # The registry cell the restore puts back to the Shelf path (not a status word).
 PROCESSING_LOCATION_CELL = "processing_location"
@@ -131,8 +135,12 @@ def cancel_refusal(job) -> str:
 
 
 def _status_of(row: Mapping, registry_mod) -> str:
-    """The row's manual edit status as stored, stripped (a hand value is kept as typed)."""
-    return str(row.get(registry_mod.MANUAL_EDIT_STATUS_COLUMN) or "").strip()
+    """The row's manual edit status cell exactly as stored, padding included.
+
+    Decisions compare this raw value, as the registry's upsert status guard
+    does, so a padded " editing " never counts as editing.
+    """
+    return str(row.get(registry_mod.MANUAL_EDIT_STATUS_COLUMN) or "")
 
 
 def _job_ids(job: Mapping) -> list[str]:
@@ -150,17 +158,38 @@ def registry_refusal(job, registry_mod) -> str:
 
     A row the registry records at review or upload (the in-flight statuses
     after editing) holds a certified edit on the bench; cancelling would
-    prune that copy. A row with no registry entry refuses nothing.
+    prune that copy. A row whose raw cell is outside MANUAL_EDIT_STATUSES (a
+    hand-typed or padded value) needs the atlas repair first: the restore
+    could not move it, and the prune would leave it pointing at a removed
+    folder. A row with no registry entry refuses nothing.
     """
     job = _require_job(job)
     certified = tuple(s for s in registry_mod.MANUAL_EDIT_IN_FLIGHT if s != registry_mod.ME_EDITING)
     for rid in _job_ids(job):
         row = registry_mod.get(rid)
-        status = _status_of(row, registry_mod) if row is not None else ""
-        if status in certified:
-            return (f"{rid} carries a certified edit (manual edit status {status}); decide it in the "
+        raw = _status_of(row, registry_mod) if row is not None else registry_mod.ME_BLANK
+        if raw.strip() in certified:
+            return (f"{rid} carries a certified edit (manual edit status {raw.strip()}); decide it in the "
                     f"Review queue or upload it before cancelling.")
+        if raw not in registry_mod.MANUAL_EDIT_STATUSES:
+            return (f"{rid} holds the manual edit status {raw!r}, which VICARIUS does not know; "
+                    f"repair it from the atlas in admin mode first.")
     return ""
+
+
+def _bench_of(job: Mapping) -> str:
+    """The real path of the job's edit bench, or "" when the record names no absolute one."""
+    bench = str(job.get("edit_bench") or "").strip()
+    return os.path.realpath(bench) if bench and os.path.isabs(bench) else ""
+
+
+def _points_at_bench(location, real_bench: str) -> bool:
+    """True when a processing_location cell names a folder inside the edit bench (never the bench itself)."""
+    text = str(location or "").strip()
+    if not real_bench or not text or not os.path.isabs(text):
+        return False
+    real = os.path.realpath(text)
+    return real != real_bench and real.startswith(real_bench.rstrip("/") + "/")
 
 
 def prune_targets(job) -> list[str]:
@@ -170,10 +199,10 @@ def prune_targets(job) -> list[str]:
     processing suffix, is never returned (the delete stays anchored).
     """
     job = _require_job(job)
-    bench = str(job.get("edit_bench") or "").strip()
-    if not bench or not os.path.isabs(bench):
+    real_bench = _bench_of(job)
+    if not real_bench:
         return []
-    real_bench = os.path.realpath(bench)
+    bench = str(job.get("edit_bench")).strip()
     targets: list[str] = []
     for row in job.get("rows") or []:
         if not isinstance(row, Mapping):
@@ -182,11 +211,10 @@ def prune_targets(job) -> list[str]:
         if not local:
             folder = str(row.get("processing_folder") or "").strip()
             local = os.path.join(bench, folder) if folder else ""
-        if not local or not os.path.isabs(local):
+        if not _points_at_bench(local, real_bench):
             continue
         real = os.path.realpath(local)
-        inside = real != real_bench and real.startswith(real_bench.rstrip("/") + "/")
-        if inside and PROCESSING_FOLDER_NAME.match(os.path.basename(real)) and real not in targets:
+        if PROCESSING_FOLDER_NAME.match(os.path.basename(real)) and real not in targets:
             targets.append(real)
     return targets
 
@@ -245,8 +273,10 @@ def restore_registry(job, registry_mod, actor_name: str, shelf_prefix: str = "")
       through upsert's named reset CLEAN_MANUAL_EDIT_RESET, and
       processing_location returns to the Shelf path the job recorded;
     - blank or awaiting (the statuses Voyager 1 may select): the status is
-      kept and processing_location returns to the Shelf path, since the
-      bench copy is about to go;
+      kept; processing_location returns to the Shelf path only when it
+      points inside the job's edit bench (a pull that failed partway wrote
+      the bench path, and the bench copy is about to go), so a location
+      someone else wrote is never overwritten;
     - done, review, upload or a value VICARIUS does not know: nothing is
       written; the outcome names the status in status_kept.
     A location is written only when the row exists and the cell differs.
@@ -281,20 +311,22 @@ def restore_registry(job, registry_mod, actor_name: str, shelf_prefix: str = "")
         if current is None:
             results.append(outcome)
             continue
-        fields = _restore_fields(row, current, registry_mod, shelf_prefix, outcome)
+        fields = _restore_fields(row, current, registry_mod, _bench_of(job), shelf_prefix, outcome)
         if fields:
             registry_mod.upsert(rid, fields, actor_name, manual_edit_reset=CLEAN_MANUAL_EDIT_RESET)
         results.append(outcome)
     return results
 
 
-def _restore_fields(job_row: Mapping, current: Mapping, registry_mod, shelf_prefix: str, outcome: dict) -> dict:
+def _restore_fields(job_row: Mapping, current: Mapping, registry_mod, real_bench: str, shelf_prefix: str,
+                    outcome: dict) -> dict:
     """The cells restore_registry writes for one row, filling `outcome` as it decides.
 
     Parameters:
         job_row: the job's row entry (its recorded shelf_location).
         current: the row as the registry holds it now.
         registry_mod: the registry library, for the status vocabulary.
+        real_bench: the job's edit bench as _bench_of gives it.
         shelf_prefix: see restore_registry.
         outcome: the row's result dict, updated in place.
 
@@ -309,6 +341,8 @@ def _restore_fields(job_row: Mapping, current: Mapping, registry_mod, shelf_pref
     else:
         outcome["status_kept"] = status
         if status not in registry_mod.MANUAL_EDIT_VOYAGER1_ELIGIBLE:
+            return fields
+        if not _points_at_bench(current.get(PROCESSING_LOCATION_CELL), real_bench):
             return fields
     shelf = str(job_row.get("shelf_location") or "").strip()
     if shelf and not _has_host_prefix(shelf):
@@ -346,8 +380,9 @@ def cancel_and_prune(store, registry_mod, job_id: str, initials: str, reason: st
          "problems": [sentences], "warnings": [sentences]}.
 
     Raises:
-        CancelRefused: when the job is terminal, a step is in flight, or a
-            transect holds a certified edit (job record or registry).
+        CancelRefused: when the job is terminal, a step is in flight, a
+            transect holds a certified edit (job record or registry), or a
+            row's status cell is a value VICARIUS does not know.
         TypeError, ValueError: for bad initials or a malformed record.
     """
     who = actor(initials)

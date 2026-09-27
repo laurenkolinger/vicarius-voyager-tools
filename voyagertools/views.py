@@ -51,7 +51,7 @@ URL_PREFIX = "/voyager-tools"
 MODULE_SLUG = "voyager_tools"
 DISPLAY_NAME = "Voyager tools"
 UI_STYLE = "voyager_tools"
-ASSET_VERSION = "20260927a"
+ASSET_VERSION = "20260927b"
 ROOT_SECTION_PREFIX = '<section class="voyager-tools"'
 STATIC_JS = "voyager_tools.js"
 STATIC_CSS = "voyager_tools.css"
@@ -85,7 +85,6 @@ MAX_BODY_BYTES = 2 * 1024 * 1024
 MAX_PROMPTS_BYTES = 4 * 1024 * 1024
 LOG_TAIL = 20
 JOB_ID_KEY = "job_id"
-MAX_JOB_ID_CHARS = 64
 CONFIRM_KEY = "confirm"
 AST = timezone(timedelta(hours=-4))
 LOCKED_PHRASE = "locked by"
@@ -123,21 +122,25 @@ def _registry_module():
     return importlib.import_module("registry")
 
 
-def _job_store_default():
-    """A manual edit JobStore on the registry's root (so a test's temp root carries both)."""
+def _jobstore_module():
+    """The manual edit job store library, imported from MANUAL_EDIT_CLONE (its JobStore and JOB_ID_PATTERN)."""
     path = str(MANUAL_EDIT_CLONE)
     if path not in sys.path:
         sys.path.insert(0, path)
-    jobstore = importlib.import_module("manualedit.jobstore")
-    return jobstore.JobStore(_registry_module().ROOT)
+    return importlib.import_module("manualedit.jobstore")
+
+
+def _job_store_default():
+    """A manual edit JobStore on the registry's root (so a test's temp root carries both)."""
+    return _jobstore_module().JobStore(_registry_module().ROOT)
 
 
 def _active_jobs_default() -> list[dict]:
     """Every unfinished manual edit job record, oldest first.
 
-    Reads JobStore.active_jobs() (program B's milestone B1, several projects
-    at once); a store without it answers its one active job, so the tools
-    work on today's single-job store and on B1's without a change here.
+    Reads JobStore.active_jobs() (several projects at once) when the store
+    has it; a store without it answers its one active job, so the tools work
+    on the single-job store and on the several-job one without a change here.
     """
     store = deps.job_store()
     lister = getattr(store, "active_jobs", None)
@@ -386,24 +389,31 @@ def _unfinished_jobs() -> list[dict]:
         raise RequestError(f"The manual edit job files cannot be read: {exc}", HTTP_SERVER_ERROR)
 
 
-def _active_job_ids() -> tuple[list[str], list[dict]]:
-    """The readable ids of every unfinished manual edit project (their union) and the job records.
-
-    An unreadable store answers ([], []): the registry status refusal in
-    rewind.refusal still holds every row that left the Shelf for the bench,
-    so a corrupt job file never takes the other tools down.
-    """
-    try:
-        jobs = _unfinished_jobs()
-    except RequestError:
-        return [], []
+def _job_row_ids(jobs: list[dict]) -> list[str]:
+    """The distinct readable ids of every row of the given job records (their union), in order."""
     ids: list[str] = []
     for job in jobs:
         for row in job.get("rows") or []:
             rid = str(row.get("readable_id") or "") if isinstance(row, Mapping) else ""
             if rid and rid not in ids:
                 ids.append(rid)
-    return ids, jobs
+    return ids
+
+
+def _listed_job_ids() -> tuple[list[str], list[dict]]:
+    """The row ids and records of every unfinished manual edit project, for display only.
+
+    An unreadable store answers ([], []) so the state and the row list still
+    load; nothing that acts on a row may use this, because a row whose pull
+    failed partway sits at awaiting with a bench location and only the job
+    record says it belongs to a project. The rewind routes read the store
+    through _unfinished_jobs and answer 500 when it cannot be read.
+    """
+    try:
+        jobs = _unfinished_jobs()
+    except RequestError:
+        return [], []
+    return _job_row_ids(jobs), jobs
 
 
 def _phase(value) -> str:
@@ -476,7 +486,7 @@ def api_state():
     """What the left list shows beside each tool: the order lock, the active job, the default versions."""
     registry = deps.registry()
     lock = registry.processing_order_lock()
-    _ids, jobs = _active_job_ids()
+    _ids, jobs = _listed_job_ids()
     defaults = {}
     for phase in ps.PHASES:
         try:
@@ -608,11 +618,12 @@ def api_workbench_delete():
 # --- tool 3: clean manual edit run ----------------------------------------------------------
 
 def _job_id(body: Mapping) -> str:
-    """The job_id the body names, stripped; a missing, blank, non-string or oversized value is a 400."""
+    """The job_id the body names, stripped; a value that is not a manual edit job id
+    (jobstore.JOB_ID_PATTERN, ME-YYYYMMDD-HHMMSS-initials) is a 400."""
     value = body.get(JOB_ID_KEY)
     text = value.strip() if isinstance(value, str) else ""
-    if not text or len(text) > MAX_JOB_ID_CHARS:
-        raise RequestError("Name the manual edit project to cancel (job_id).")
+    if not _jobstore_module().JOB_ID_PATTERN.fullmatch(text):
+        raise RequestError("Name the manual edit project to cancel by its job_id (ME-YYYYMMDD-HHMMSS-initials).")
     return text
 
 
@@ -651,7 +662,12 @@ def api_manual_edit_cancel():
 # --- tools 4 and 5: rewind and spot redo ------------------------------------------------------
 
 def _rewind_rows(registry, active_ids) -> list[dict]:
-    """Rows a rewind could apply to: every row Voyager 1 has touched, with the facts the page needs."""
+    """Rows a rewind could apply to: every row Voyager 1 has touched, with the facts the page needs.
+
+    manual_edit_under_way is True for a row whose manual edit status is one
+    after the pull (registry.MANUAL_EDIT_IN_FLIGHT), which the rewind refuses,
+    so the page can mark it without copying the status words.
+    """
     out = []
     for row in registry.load():
         if not rewind.row_started(row) and not str(row.get("psx_file") or "").strip():
@@ -662,7 +678,10 @@ def _rewind_rows(registry, active_ids) -> list[dict]:
             "site_name": deps.site_name(row.get("site", "")), "transect": row.get("transect", ""),
             "year": row.get("year", ""), "season_token": row.get("season_token", ""),
             "step1_status": row.get("step1_status", ""), "stage": row.get("stage", ""),
-            "manual_edit_status": row.get("manual_edit_status", ""), "run_state": registry.run_state(row),
+            "manual_edit_status": row.get("manual_edit_status", ""),
+            "manual_edit_under_way": str(row.get(registry.MANUAL_EDIT_STATUS_COLUMN) or "").strip()
+            in registry.MANUAL_EDIT_IN_FLIGHT,
+            "run_state": registry.run_state(row),
             "processing_location": location, "local": rewind.is_local_folder(location),
             "in_job": row.get("readable_id") in active_ids, "psx_file": row.get("psx_file", ""),
         })
@@ -673,7 +692,7 @@ def _rewind_rows(registry, active_ids) -> list[dict]:
 @guarded
 def api_rewind_rows():
     """The rows the rewind and spot redo selects list."""
-    active_ids, _jobs = _active_job_ids()
+    active_ids, _jobs = _listed_job_ids()
     return jsonify({"rows": _rewind_rows(deps.registry(), set(active_ids)), "targets": [
         {"value": t, "label": rewind.TARGET_WORDS[t]} for t in rewind.TARGETS]})
 
@@ -690,9 +709,12 @@ def _rewind_row(registry, body: Mapping) -> tuple[dict, str]:
     return row, target
 
 
-def _refuse_rewind(registry, row: dict, target: str) -> None:
-    """Raise the 409 refusal (with the pull-back command when that is the fix) when the row cannot rewind."""
-    active_ids, _jobs = _active_job_ids()
+def _refuse_rewind(registry, row: dict, target: str, active_ids: list[str]) -> None:
+    """Raise the 409 refusal (with the pull-back command when that is the fix) when the row cannot rewind.
+
+    Parameters:
+        active_ids: the row ids of every unfinished manual edit project (_job_row_ids).
+    """
     why = rewind.refusal(row, target, registry.run_is_live, active_ids, registry_mod=registry)
     if why:
         extra = {"pullback_command": rewind.pullback_command(row["readable_id"])} if "not on this machine" in why else {}
@@ -706,7 +728,7 @@ def api_rewind_plan():
     body = _json_body()
     registry = deps.registry()
     row, target = _rewind_row(registry, body)
-    _refuse_rewind(registry, row, target)
+    _refuse_rewind(registry, row, target, _job_row_ids(_unfinished_jobs()))
     the_plan = rewind.plan(row, target, registry_mod=registry)
     if the_plan["empty"]:
         raise RequestError(f"{row['readable_id']} has nothing to rewind {the_plan['target_words']}.", HTTP_CONFLICT)
@@ -721,8 +743,8 @@ def _apply_rewind(body: Mapping, spot: bool) -> dict:
     if spot:
         body = dict(body, target=rewind.TARGET_BEFORE_STEP1)
     row, target = _rewind_row(registry, body)
-    _refuse_rewind(registry, row, target)
-    active_ids, _jobs = _active_job_ids()
+    active_ids = _job_row_ids(_unfinished_jobs())
+    _refuse_rewind(registry, row, target, active_ids)
     try:
         if spot:
             return rewind.spot_redo(row, registry, _actor(initials), initials, deps.run_chunk, registry.run_is_live,

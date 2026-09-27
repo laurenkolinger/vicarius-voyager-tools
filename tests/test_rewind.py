@@ -176,8 +176,30 @@ class Refusals(Folder):
             with self.subTest(status=status):
                 row = dict(self.row, manual_edit_status=status)
                 self.assertEqual(rw.refusal(row, rw.TARGET_BEFORE_STEP1, not_live, registry_mod=self.registry), "")
-        row = dict(self.row, manual_edit_status="  awaiting ")
-        self.assertEqual(rw.refusal(row, rw.TARGET_BEFORE_STEP1, not_live, registry_mod=self.registry), "")
+
+    def test_a_padded_status_is_refused_as_the_upsert_guard_would(self):
+        """The registry's upsert guard compares the raw stored cell, so the refusal does too."""
+        for value in (" done ", "  awaiting ", " ", "done\n"):
+            with self.subTest(value=value):
+                row = dict(self.row, manual_edit_status=value)
+                why = rw.refusal(row, rw.TARGET_BEFORE_STEP1, not_live, registry_mod=self.registry)
+                self.assertIn("which VICARIUS does not know", why)
+        row = dict(self.row, manual_edit_status=" editing ")
+        self.assertIn("on the edit bench", rw.refusal(row, rw.TARGET_BEFORE_STEP1, not_live,
+                                                      registry_mod=self.registry))
+
+    def test_a_padded_done_is_refused_before_anything_moves_under_the_upsert_guard(self):
+        self.registry.MANUAL_EDIT_UPSERT_GUARD = True
+        self._write_raw_status(" done ")
+        with self.assertRaises(rw.RewindRefused) as caught:
+            rw.apply(self.registry.get(RID), rw.TARGET_BEFORE_STEP1, self.registry, "voyager_tools:LO",
+                     fake_chunk_runner, not_live)
+        self.assertIn("' done '", str(caught.exception))
+        self.assertEqual(self.chunks(), [SIBLING, RID])
+        self.assertTrue(os.path.exists(os.path.join(self.folder, "reports", f"{RID}_step1.pdf")))
+        self.assertFalse(os.path.exists(os.path.join(self.folder, "_rewind")))
+        row = self.registry.get(RID)
+        self.assertEqual((row["manual_edit_status"], row["step1_status"]), (" done ", "complete"))
 
     def test_the_status_refusal_comes_before_the_location_refusals(self):
         row = dict(self.row, manual_edit_status="editing", processing_location="146.226.147.140:/volume6/x/MRS_T1_3D")
