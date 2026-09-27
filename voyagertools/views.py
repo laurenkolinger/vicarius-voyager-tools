@@ -136,18 +136,13 @@ def _job_store_default():
 
 
 def _active_jobs_default() -> list[dict]:
-    """Every unfinished manual edit job record, oldest first.
+    """Every unfinished manual edit job record, oldest first (several projects at once).
 
-    Reads JobStore.active_jobs() (several projects at once) when the store
-    has it; a store without it answers its one active job, so the tools work
-    on the single-job store and on the several-job one without a change here.
+    Read strictly: a job file the store cannot read raises, so every guard
+    built on this list refuses rather than acting on a transect an unreadable
+    project may hold (the display reads answer an empty list instead).
     """
-    store = deps.job_store()
-    lister = getattr(store, "active_jobs", None)
-    if callable(lister):
-        return list(lister())
-    job = store.active_job()
-    return [job] if job else []
+    return list(deps.job_store().active_jobs(strict=True))
 
 
 def _read_locks_file() -> bool:

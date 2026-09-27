@@ -170,7 +170,7 @@ class WithStores(unittest.TestCase):
         self.job = self.store.create_job(
             [{"readable_id": RID, "site": "MRS", "transect": "T1", "processing_folder": FOLDER,
               "shelf_location": f"{SHELF_PARENT}/{FOLDER}", "psx_basename": "MRS_T1_2023_2023.psx"}],
-            self.bench, "LO", 1000, 5000)
+            self.bench, "LO")
         self.local = os.path.join(self.bench, FOLDER)
         os.makedirs(self.local)
         Path(self.local, "MRS_T1_2023_2023.psx").write_bytes(b"psx")

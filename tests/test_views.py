@@ -427,7 +427,7 @@ class ManualEditRoutes(ToolsCase):
         job = self.jobs.create_job(
             [{"readable_id": RID_DONE, "site": "MRS", "transect": "T1", "processing_folder": FOLDER,
               "shelf_location": f"{SHELF_PARENT}/{FOLDER}", "psx_basename": "MRS_T1_2023_2023.psx"}],
-            str(self.bench), "LO", 100, 500)
+            str(self.bench), "LO")
         local.mkdir()
         (local / "x.psx").write_bytes(b"p")
         self.registry.upsert(RID_DONE, {"manual_edit_status": "editing", "processing_location": str(local)}, "seed")
@@ -439,9 +439,8 @@ class ManualEditRoutes(ToolsCase):
                                                                                   **body))
 
     def second_project(self, first):
-        """A second unfinished project on another transect (RID_LBH, its own bench folder), and a store
-        whose active_jobs() lists both (the job store answers only one active job until program B's B1
-        ships active_jobs)."""
+        """A second unfinished project on another transect (RID_LBH, its own bench folder); the job store's
+        own active_jobs() lists both."""
         folder = "LBH_T2_3D"
         (self.bench / folder).mkdir()
         record = dict(first, job_id="ME-20260927-020000-CC", created_by="CC", projects={},
@@ -450,16 +449,8 @@ class ManualEditRoutes(ToolsCase):
                              "psx_basename": "LBH_T2_2025_2025.psx"}])
         self.jobs.save_job(record)
         self.registry.upsert(RID_LBH, {"manual_edit_status": "editing"}, "seed")
-        jobs = self.jobs
-
-        class ManyProjects(jobstore.JobStore):
-            def active_jobs(self):
-                found = [self.load_job(j["job_id"]) for j in self.list_jobs() if not j.get("corrupt")]
-                return sorted((j for j in found if j["phase"] not in jobstore.TERMINAL_PHASES),
-                              key=lambda j: j["job_id"])
-        many = ManyProjects(str(self.reg_root))
-        views.deps.job_store = lambda: many
-        return record, jobs
+        views.deps.job_store = lambda: self.jobs
+        return record, self.jobs
 
     def test_no_job(self):
         self.unlock()
@@ -547,30 +538,30 @@ class ManualEditRoutes(ToolsCase):
         left = self.client.get("/voyager-tools/api/manual-edit").get_json()["jobs"]
         self.assertEqual([j["job_id"] for j in left], [first["job_id"]])
 
-    def test_the_default_seam_falls_back_to_the_one_active_job(self):
+    def test_the_default_seam_reads_every_active_project_strictly(self):
         job, _local = self.make_job()
         fresh = views.Deps()
-        fresh.job_store = lambda: self.jobs
         views.deps.job_store = lambda: self.jobs
-        self.assertFalse(hasattr(self.jobs, "active_jobs") and callable(getattr(self.jobs, "active_jobs")))
         self.assertEqual([j["job_id"] for j in fresh.active_jobs()], [job["job_id"]])
+        seen = []
 
         class Lister:
-            def active_jobs(self):
+            def active_jobs(self, strict=False):
+                seen.append(strict)
                 return [{"job_id": "a"}, {"job_id": "b"}]
         views.deps.job_store = lambda: Lister()
         self.assertEqual([j["job_id"] for j in fresh.active_jobs()], ["a", "b"])
+        self.assertEqual(seen, [True], "a guard never reads past an unreadable job file")
 
-    def test_corrupt_pointer_is_a_500_line(self):
+    def test_an_unreadable_job_file_is_a_500_line(self):
         self.unlock()
-        (self.reg_root / "manual_edit").mkdir()
-        (self.reg_root / "manual_edit" / "current.json").write_text("{not json")
+        job, _local = self.make_job()
+        self.jobs.job_path(job["job_id"]).write_text("{not json")
         r = self.client.get("/voyager-tools/api/manual-edit")
         self.assertEqual(r.status_code, 500)
         self.assertIn("cannot be read", r.get_json()["error"])
+        self.assertIn("not valid JSON", r.get_json()["error"])
 
-
-class RewindRoutes(ToolsCase):
     def test_rows(self):
         self.unlock()
         r = self.client.get("/voyager-tools/api/rewind/rows")
@@ -626,7 +617,7 @@ class RewindRoutes(ToolsCase):
         self.unlock()
         self.jobs.create_job(
             [{"readable_id": RID_DONE, "site": "MRS", "transect": "T1", "processing_folder": FOLDER,
-              "shelf_location": "/s", "psx_basename": "x.psx"}], str(self.bench), "LO", 1, 1)
+              "shelf_location": "/s", "psx_basename": "x.psx"}], str(self.bench), "LO")
         r = self.client.post("/voyager-tools/api/rewind/plan", json={"readable_id": RID_DONE})
         self.assertEqual(r.status_code, 409)
         self.assertIn("unfinished manual edit project", r.get_json()["error"])
@@ -655,8 +646,8 @@ class RewindRoutes(ToolsCase):
         """Without the job store the project guard is unknown, so plan, apply and spot redo answer 500;
         the row list and the state still load, with no row marked as in a project."""
         self.unlock()
-        (self.reg_root / "manual_edit").mkdir()
-        (self.reg_root / "manual_edit" / "current.json").write_text("{not json")
+        (self.reg_root / "manual_edit" / "jobs").mkdir(parents=True)
+        (self.reg_root / "manual_edit" / "jobs" / "ME-20260927-010000-LO.json").write_text("{not json")
         for route in ("/voyager-tools/api/rewind/plan", "/voyager-tools/api/rewind/apply",
                       "/voyager-tools/api/spot-redo"):
             r = self.client.post(route, json={"readable_id": RID_DONE, "initials": "LO", "confirm": True})
