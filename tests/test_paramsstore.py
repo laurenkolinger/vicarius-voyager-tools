@@ -1097,6 +1097,18 @@ class Voyager2SchemaTests(_SchemaRules, unittest.TestCase):
         self.assertTrue(any("voyager2.preview.max_side_px" in p for p in problems))
         self.assertTrue(any("voyager2.dem.source" in p for p in problems))
 
+    def test_no_tooltip_closes_on_a_negation(self):
+        negation = re.compile(r"\b(no|not|never|cannot|without|none|nothing)\b|n't\b", re.IGNORECASE)
+        for entry in self.schema["keys"] + self.schema["sections"]:
+            closing_clause = re.split(r"[.;,]\s", entry["tooltip"].rstrip(". "))[-1]
+            self.assertIsNone(negation.search(closing_clause),
+                              "%s: closes on a negation" % (entry.get("path") or entry["id"]))
+
+    def test_no_tooltip_names_an_unexplained_codebase_term(self):
+        jargon = re.compile(r"GPU claim|GPU ladder|gpu_ladder|beside_editor", re.IGNORECASE)
+        for entry in self.schema["keys"] + self.schema["sections"]:
+            self.assertIsNone(jargon.search(entry["tooltip"]), entry.get("path") or entry["id"])
+
     @unittest.skipUnless(VOYAGER2_DEFAULTS.exists(), "Voyager 2 module defaults not present")
     def test_schema_covers_every_module_default_exactly(self):
         defaults = yaml.safe_load(VOYAGER2_DEFAULTS.read_text(encoding="utf-8"))

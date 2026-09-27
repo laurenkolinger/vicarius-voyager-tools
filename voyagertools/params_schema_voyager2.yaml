@@ -63,7 +63,7 @@ keys:
     min: 0
     max: 65535
     label: Card mask
-    tooltip: Type which graphics cards Metashape may use as a bit mask, 1 for card 0, 2 for card 1, 3 for both. The default 0 runs Voyager 2 on the processors alone, so no card is touched and no GPU claim is taken.
+    tooltip: Type which graphics cards Metashape may use as a bit mask, 1 for card 0, 2 for card 1, 3 for both. The default 0 runs Voyager 2 on the processors alone and leaves both cards free.
 
   - path: voyager2.compute.min_available_gb
     section: resources
@@ -72,7 +72,7 @@ keys:
     min: 0
     unit: GB
     label: Memory for a processor run
-    tooltip: Type the GB of free system memory a run without cards needs at start. Beside an open manual edit window Voyager 2 asks for the larger of this and the GPU ladder's figure.
+    tooltip: Type the GB of free system memory a run without cards needs at start. Beside an open manual edit window, Voyager 2 asks for the larger of this and the memory the GPU right-of-way settings require beside the editor.
 
   - path: voyager2.dem.source
     section: dem
@@ -157,14 +157,14 @@ keys:
     type: boolean
     default: true
     label: Save texture
-    tooltip: Tick this to write the texture pages beside the OBJ file. Default on; without it the model has no photo colour.
+    tooltip: Tick this to write the texture pages beside the OBJ file. Default on, which gives the model its photo colour.
 
   - path: voyager2.model_export.save_uv
     section: model_export
     type: boolean
     default: true
     label: Save texture coordinates
-    tooltip: Tick this to write the texture coordinates that tie each mesh face to its place on a texture page. Default on; the texture cannot be applied without them.
+    tooltip: Tick this to write the texture coordinates that tie each mesh face to its place on a texture page. Default on; the texture needs them to be applied.
 
   - path: voyager2.model_export.save_normals
     section: model_export
