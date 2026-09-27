@@ -35,6 +35,12 @@ from voyagertools import paramsstore as ps  # noqa: E402
 VICARIUS_ROOT = Path(os.environ.get("VICARIUS_ROOT", "/mnt/rip/vicarius_drive/vicarius"))
 REAL_CHECKOUT = VICARIUS_ROOT / "modules" / "voyagerparams" / "github_repo"
 VOYAGER1_TEMPLATE = VICARIUS_ROOT / "modules" / "3D_phase_1" / "github_repo" / "analysis_params.yaml"
+# The parameters module 3D_phase2 reads; its src/params.py refuses any key not in this file.
+VOYAGER2_DEFAULTS = VICARIUS_ROOT / "modules" / "3D_phase2" / "github_repo" / "config" / "voyager2_defaults.yaml"
+# Spec D section 4.15 as amended by A1.4: removed and added keys of the voyager2 body.
+VOYAGER2_REMOVED = ("voyager2.grid.resolution_mm",)
+VOYAGER2_ADDED = ("voyager2.orthomosaic.resolution_mm", "voyager2.dem.resolution_mm", "voyager2.psx.save",
+                  "voyager2.psx.keep_orthomosaic")
 
 FIXED_NOW = "2026-09-04T01:00:00-04:00"
 
@@ -689,7 +695,7 @@ class SaveDefaultTests(_StoreCase):
         self.assertEqual(refs, ["v1.4.0", "v1.3.0", "v1.2.0", "v1.1.0", "v1.0.0"])
         self.assertEqual(self.store.default_version("voyager1"), "v1.4.0")
 
-    def test_save_on_phase_without_schema_only_checks_shape(self):
+    def test_save_of_keys_the_schema_does_not_know_only_checks_shape(self):
         values = self.store.load("voyager2", "default").values
         values["processing"]["model_processing"]["ortho_tile_size"] = "any string is fine here"
         saved = self.store.save_default("voyager2", values, "draft edit", "LO")
@@ -938,25 +944,25 @@ class DefaultRootTests(unittest.TestCase):
             ps.ParamsStore("/nonexistent/voyagerparams", run_git=FakeGit())
 
 
-class SchemaTests(unittest.TestCase):
-    """The Voyager 1 editor schema against the rules of the task and the
-    template it describes."""
+class _SchemaRules:
+    """The rules every editor schema meets (entry fields, types, tooltips);
+    a concrete case sets PHASE and mixes this into unittest.TestCase."""
 
     SENTENCE_END = re.compile(r"[.!?](\s|$)")
+    PHASE = ""
 
     @classmethod
     def setUpClass(cls):
-        cls.schema = ps.load_schema("voyager1")
+        cls.schema = ps.load_schema(cls.PHASE)
         cls.keys = {entry["path"]: entry for entry in cls.schema["keys"]}
         cls.sections = {section["id"]: section for section in cls.schema["sections"]}
 
     def test_schema_loads_and_has_shape(self):
-        self.assertEqual(self.schema["phase"], "voyager1")
+        self.assertEqual(self.schema["phase"], self.PHASE)
         self.assertTrue(self.schema["keys"])
         self.assertTrue(self.schema["sections"])
-        self.assertIsNone(ps.load_schema("voyager2"))
         with self.assertRaises(ValueError):
-            ps.load_schema("../voyager1")
+            ps.load_schema("../" + self.PHASE)
 
     def test_every_entry_well_formed(self):
         paths = [entry["path"] for entry in self.schema["keys"]]
@@ -977,11 +983,6 @@ class SchemaTests(unittest.TestCase):
                 self.assertEqual(len(entry["choices"]), len(set(map(str, entry["choices"]))))
             if "min" in entry and "max" in entry:
                 self.assertLess(entry["min"], entry["max"], entry["path"])
-
-    def test_hidden_only_on_max_chunks_per_psx(self):
-        hidden = sorted(path for path, entry in self.keys.items() if entry.get("hidden"))
-        self.assertEqual(hidden, ["processing.max_chunks_per_psx"])
-        self.assertIs(self.keys["processing.max_chunks_per_psx"]["hidden"], True)
 
     def test_tooltips_follow_the_sentence_rules(self):
         banned = re.compile(r"\b" + "la" "nd" + r"(s|ed|ing)?\b", re.IGNORECASE)
@@ -1039,6 +1040,22 @@ class SchemaTests(unittest.TestCase):
         self.assertTrue(ps.check_value(entry, "a,b"))
         self.assertEqual(ps.check_value(entry, [1]), [])
 
+    def test_every_section_has_keys(self):
+        used = {entry["section"] for entry in self.schema["keys"]}
+        self.assertEqual(used, set(self.sections))
+
+
+class SchemaTests(_SchemaRules, unittest.TestCase):
+    """The Voyager 1 editor schema against the rules of the task and the
+    template it describes."""
+
+    PHASE = "voyager1"
+
+    def test_hidden_only_on_max_chunks_per_psx(self):
+        hidden = sorted(path for path, entry in self.keys.items() if entry.get("hidden"))
+        self.assertEqual(hidden, ["processing.max_chunks_per_psx"])
+        self.assertIs(self.keys["processing.max_chunks_per_psx"]["hidden"], True)
+
     @unittest.skipUnless(VOYAGER1_TEMPLATE.exists(), "Voyager 1 template not present")
     def test_schema_covers_every_template_key_exactly(self):
         template = yaml.safe_load(VOYAGER1_TEMPLATE.read_text(encoding="utf-8"))
@@ -1051,6 +1068,55 @@ class SchemaTests(unittest.TestCase):
     def test_template_validates_clean(self):
         template = yaml.safe_load(VOYAGER1_TEMPLATE.read_text(encoding="utf-8"))
         self.assertEqual(ps.validate_values("voyager1", template), [])
+
+
+class Voyager2SchemaTests(_SchemaRules, unittest.TestCase):
+    """The Voyager 2 editor schema: the same entry and tooltip rules, the key
+    set of spec D 4.15 as amended by A1.4 and as module 3D_phase2 reads it."""
+
+    PHASE = "voyager2"
+
+    def test_no_key_is_hidden(self):
+        self.assertEqual([path for path, entry in self.keys.items() if entry.get("hidden")], [])
+
+    def test_the_amendment_removes_and_adds_its_keys(self):
+        for path in VOYAGER2_REMOVED:
+            self.assertNotIn(path, self.keys)
+        for path in VOYAGER2_ADDED:
+            self.assertIn(path, self.keys)
+        self.assertTrue(all(path.startswith("voyager2.") for path in self.keys))
+
+    def test_the_legacy_version_keys_are_left_to_the_shape_check(self):
+        legacy = {"processing": {"model_processing": {"ortho_tile_size": "any string"}}}
+        self.assertEqual(ps.validate_values("voyager2", legacy), [])
+
+    def test_a_value_out_of_range_is_named(self):
+        values = {"voyager2": {"preview": {"max_side_px": 10}, "dem": {"source": "lidar"}}}
+        problems = ps.validate_values("voyager2", values)
+        self.assertEqual(len(problems), 2)
+        self.assertTrue(any("voyager2.preview.max_side_px" in p for p in problems))
+        self.assertTrue(any("voyager2.dem.source" in p for p in problems))
+
+    def test_no_tooltip_closes_on_a_negation(self):
+        negation = re.compile(r"\b(no|not|never|cannot|without|none|nothing)\b|n't\b", re.IGNORECASE)
+        for entry in self.schema["keys"] + self.schema["sections"]:
+            closing_clause = re.split(r"[.;,]\s", entry["tooltip"].rstrip(". "))[-1]
+            self.assertIsNone(negation.search(closing_clause),
+                              "%s: closes on a negation" % (entry.get("path") or entry["id"]))
+
+    def test_no_tooltip_names_an_unexplained_codebase_term(self):
+        jargon = re.compile(r"GPU claim|GPU ladder|gpu_ladder|beside_editor", re.IGNORECASE)
+        for entry in self.schema["keys"] + self.schema["sections"]:
+            self.assertIsNone(jargon.search(entry["tooltip"]), entry.get("path") or entry["id"])
+
+    @unittest.skipUnless(VOYAGER2_DEFAULTS.exists(), "Voyager 2 module defaults not present")
+    def test_schema_covers_every_module_default_exactly(self):
+        defaults = yaml.safe_load(VOYAGER2_DEFAULTS.read_text(encoding="utf-8"))
+        flat = ps.flatten(defaults)
+        self.assertEqual(sorted(flat), sorted(self.keys))
+        for path, value in flat.items():
+            self.assertEqual(self.keys[path]["default"], value, path)
+        self.assertEqual(ps.validate_values("voyager2", defaults), [])
 
 
 @unittest.skipUnless(REAL_CHECKOUT.exists(), "voyagerparams checkout not present")

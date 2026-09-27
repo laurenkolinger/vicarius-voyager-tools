@@ -973,9 +973,6 @@
     });
     pmPhase.addEventListener("change", loadParams);
 
-    function getPath(values, path) {
-      return path.split(".").reduce(function (node, key) { return node && typeof node === "object" ? node[key] : undefined; }, values);
-    }
     function setPath(values, path, value) {
       var parts = path.split(".");
       var node = values;
@@ -1012,8 +1009,11 @@
         pmEditor.innerHTML = '<p class="count">No editor schema for this phase; edit the values through the YAML box.</p>';
         return;
       }
-      pmEditor.innerHTML = schema.sections.map(function (section) {
-        var keys = schema.keys.filter(function (k) { return k.section === section.id; });
+      var shown = editorKeys(schema, values);
+      var note = !shown.keys.length ? "This file holds none of the keys the editor knows; edit its values through the YAML box."
+        : (shown.missing ? shown.missing + " editor key" + (shown.missing === 1 ? " is" : "s are") + " not in this file; add " + (shown.missing === 1 ? "it" : "them") + " through the YAML box." : "");
+      pmEditor.innerHTML = (note ? '<p class="count">' + esc(note) + "</p>" : "") + schema.sections.map(function (section) {
+        var keys = shown.keys.filter(function (k) { return k.section === section.id; });
         if (!keys.length) return "";
         return "<fieldset><legend>" + esc(section.label) +
           '<button type="button" class="tip" aria-label="About ' + esc(section.label) + '" title="' + esc(section.tooltip) + '"><span>i</span></button></legend>' +
@@ -1184,6 +1184,20 @@
     showTool(readStore(LS_TAB) || TOOLS[0]);
   }
 
+  function getPath(values, path) {
+    return path.split(".").reduce(function (node, key) { return node && typeof node === "object" ? node[key] : undefined; }, values);
+  }
+
+  // The schema keys the editor shows for a loaded file: only those the file
+  // holds, so a save never invents a value for a key the file lacks (a
+  // legacy version file with none of the schema's keys shows no field at
+  // all). Returns { keys, missing } where missing counts the keys left out.
+  function editorKeys(schema, values) {
+    var all = (schema && schema.keys) || [];
+    var keys = all.filter(function (k) { return getPath(values, k.path) !== undefined; });
+    return { keys: keys, missing: all.length - keys.length };
+  }
+
   function ensureStylesheet(base, version) {
     if (document.querySelector('link[data-vt-css="1"]')) return;
     var link = document.createElement("link");
@@ -1193,7 +1207,7 @@
     document.head.appendChild(link);
   }
 
-  window.VoyagerTools = { mount: mount };
+  window.VoyagerTools = { mount: mount, editorKeys: editorKeys };
 
   // Standalone page: mount the root the template rendered.
   if (document.readyState === "loading") {

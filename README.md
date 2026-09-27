@@ -27,7 +27,7 @@ Every version, branch and custom parameter set for a phase (`voyager1` or `voyag
 - **Save as branch** (name, description, why) starts at the base version's number under the branch's own name (`branches/<slug>/v1.2.0`), so a branch never collides with the default line; a later save to the same branch bumps within that branch.
 - **Custom run sets** are written automatically at RUN time by the Voyager 1 and Voyager 2 setup windows, never by this tool: `custom/<run_id>.yaml`, and a custom set never becomes the default by itself.
 
-Every save commits and, when the checkout has a remote, pushes to `laurenkolinger/voyagerparams` (public) through `paramsstore.commit_and_push`; a push failure is reported rather than raised, so a save is never lost to a flaky connection. The full parameter editor is generated from `voyagertools/params_schema_voyager1.yaml` (label, tooltip, type, default, and range or choices per key; `processing.max_chunks_per_psx` is marked hidden because the project structure controls it, not the operator), so a schema change is the only place a new key's tooltip needs to be written.
+Every save commits and, when the checkout has a remote, pushes to `laurenkolinger/voyagerparams` (public) through `paramsstore.commit_and_push`; a push failure is reported rather than raised, so a save is never lost to a flaky connection. The full parameter editor is generated from `voyagertools/params_schema_voyager1.yaml` and `voyagertools/params_schema_voyager2.yaml` (label, tooltip, type, default, and range or choices per key; `processing.max_chunks_per_psx` is marked hidden because the project structure controls it, not the operator), so a schema change is the only place a new key's tooltip needs to be written. The Voyager 2 schema holds exactly the keys module 3D_phase2 reads (its `config/voyager2_defaults.yaml`; a test keeps the two equal). The editor shows only the keys the loaded file holds, so a save never invents a value: the legacy voyagerparams `voyager2` v0.1.0 draft holds none of them and is edited through the YAML box.
 
 ## Layout
 
@@ -36,7 +36,7 @@ Every save commits and, when the checkout has a remote, pushes to `laurenkolinge
 - `scripts/rewind_chunk.py`: the Metashape script (`metashape -r scripts/rewind_chunk.py <psx> --label <id> --out <json>`; `--fake` for tests).
 - `templates/voyager_tools/panel.html` (the fragment, root `<section class="voyager-tools">`) and `index.html` (the standalone page); `static/voyager_tools.css` (scoped under `.voyager-tools`); `static/voyager_tools.js` (an IIFE exporting `window.VoyagerTools = {mount(el)}`).
 - `standalone_app.py`: a smoke-test host on port 5098 (`VOYAGER_TOOLS_ADMIN_PIN=... python3 standalone_app.py --port 5098`); the platform never starts it.
-- `voyagertools/paramsstore.py` and `params_schema_voyager1.yaml`: the voyagerparams reader and writer and the editor schema (plan task A7).
+- `voyagertools/paramsstore.py`, `params_schema_voyager1.yaml` and `params_schema_voyager2.yaml`: the voyagerparams reader and writer and the two editor schemas (plan task A7; program D milestone D1f for Voyager 2).
 
 ## API in one table
 
