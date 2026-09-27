@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
 Module: voyagertools/views.py
-Purpose: The web layer of the Atlas control panel (module voyager_tools,
-         shown under that display name since program C milestone C3; the
-         code names stay): one Flask blueprint, voyager_tools_bp, mounted at
+Purpose: The web layer of the Atlas control panel (module voyager_tools;
+         the code names keep the slug): one Flask blueprint, voyager_tools_bp, mounted at
          /voyager-tools by the VICARIUS desktop
          (vicarius_ui_os/voyager_tools_views.py) and by standalone_app.py. It
          serves the page, the fragment the desktop window and the atlas embed
@@ -13,7 +12,9 @@ Purpose: The web layer of the Atlas control panel (module voyager_tools,
          prompts doc, the parameter defaults and the camera model table. The
          settings panes of the panel read and write the desktop's own
          /api/settings routes (vicarius_ui_os/settings_views.py), not routes
-         of this blueprint.
+         of this blueprint. A parameter default or branch save is written
+         to the settings history through deps.record_setting, which the
+         desktop wires; without it the save is refused and undone.
 Inputs:  HTTP requests; the TCRMP 3D registry library; the manual edit job
          store; the voyagerparams checkout through paramsstore; the
          Carousel's nas.yaml and its snapshot helpers; the prompts document.
@@ -57,7 +58,7 @@ URL_PREFIX = "/voyager-tools"
 MODULE_SLUG = "voyager_tools"
 DISPLAY_NAME = "Atlas control panel"
 UI_STYLE = "voyager_tools"
-ASSET_VERSION = "20260927c"
+ASSET_VERSION = "20260927d"
 ROOT_SECTION_PREFIX = '<section class="voyager-tools"'
 STATIC_JS = "voyager_tools.js"
 STATIC_SETTINGS_JS = "vt_settings.js"  # the settings and desktop panes (program C spec 5.3)
@@ -97,6 +98,10 @@ DEFAULT_PHASE = "voyager1"
 # refused by a manual edit review, open or upload route.
 INITIALS_PATTERN = re.compile(r"^[A-Z]{2,4}$")
 LINE_INITIALS = "Type your initials, two to four letters, at the top of the panel before saving."
+PARAMS_HISTORY_ONLY_ON_DESKTOP = ("Parameter defaults are saved only from the desktop on port 5090, which keeps "
+                                  "the settings history.")
+PARAMS_DEFAULT_KEY = "{phase}/DEFAULT"
+PARAMS_BRANCH_KEY = "{phase}/branches/{slug}"
 ACTOR_PREFIX = "voyager_tools:"
 MAX_BODY_BYTES = 2 * 1024 * 1024
 MAX_PROMPTS_BYTES = 4 * 1024 * 1024
@@ -228,6 +233,11 @@ def _site_name_default(code) -> str:
     return ""
 
 
+def _record_setting_refused(phase, key, old_version, new_version, by, reason) -> str:
+    """The default record_setting: a host with no settings history refuses every parameter save."""
+    raise RuntimeError(PARAMS_HISTORY_ONLY_ON_DESKTOP)
+
+
 class Deps:
     """Every seam the routes reach through; a test replaces attributes with fakes.
 
@@ -238,7 +248,10 @@ class Deps:
     -> [paths]; local_snapshot(path) -> snapshot; remote_snapshot(path) ->
     snapshot; rmtree(path); append_processing_log(row); run_chunk(psx,
     label, out_dir) -> result document; site_name(code) -> str;
-    prompts_doc() -> Path; now_iso() -> str.
+    prompts_doc() -> Path; now_iso() -> str; record_setting(phase, key,
+    old_version, new_version, by, reason) -> the recorded time, the
+    settings history line of a parameter save (the desktop wires
+    settings_stores.record_params_save; the default refuses).
     """
 
     def __init__(self):
@@ -259,6 +272,7 @@ class Deps:
         self.site_name: Callable[[str], str] = _site_name_default
         self.prompts_doc: Callable[[], Path] = lambda: PROMPTS_DOC
         self.now_iso: Callable[[], str] = lambda: datetime.now(AST).isoformat(timespec="seconds")
+        self.record_setting: Callable[..., str] = _record_setting_refused
 
 
 deps = Deps()
@@ -1054,6 +1068,36 @@ def api_params_validate():
     return jsonify({"ok": True, "problems": [], "values": values, "diff": diff, "level": level})
 
 
+def _branch_version(store: ps.ParamsStore, phase: str, slug: str) -> str | None:
+    """The newest version of branch <slug>, or None when the branch has no file yet."""
+    for entry in store.list_versions(phase):
+        if entry.kind == "branch" and entry.branch == slug:
+            return entry.version
+    return None
+
+
+def _record_or_undo(store: ps.ParamsStore, paths_before: list[str], history: tuple) -> None:
+    """Write the settings history line of a parameter save, or undo the files that save wrote.
+
+    Parameters:
+        store: the store that just wrote the files.
+        paths_before: store.pending_paths taken before the save, left alone.
+        history: the arguments of deps.record_setting.
+    Raises:
+        RequestError: 500 with the history's sentence when the line could
+            not be written; the new files are removed or restored first.
+    """
+    try:
+        deps.record_setting(*history)
+    except (RuntimeError, ValueError, OSError) as exc:
+        try:
+            store.discard_pending(only=[p for p in store.pending_paths if p not in paths_before])
+        except (ps.GitError, OSError, ValueError) as undo_exc:
+            raise RequestError(f"{exc} Undoing the parameter files also failed ({undo_exc}); check "
+                               f"{store.root} by hand.", HTTP_SERVER_ERROR) from exc
+        raise RequestError(str(exc), HTTP_SERVER_ERROR) from exc
+
+
 def _commit(store: ps.ParamsStore, message: str) -> dict:
     """Commit and push what the store wrote; a git failure is reported, never raised."""
     try:
@@ -1075,12 +1119,16 @@ def api_params_branch():
     base_ref = _text(body, "base_ref", max_chars=200) or "default"
     store = _store()
     values = _values_from_body(dict(body, base_ref=base_ref), phase, store)
+    paths_before = store.pending_paths
     try:
+        old_version = _branch_version(store, phase, slug)
         saved = store.save_branch(phase, base_ref, slug, description, why, values, initials)
     except ps.StoreLocked as exc:
         raise RequestError(str(exc), HTTP_CONFLICT)
     except (TypeError, ValueError, FileNotFoundError) as exc:
         raise RequestError(str(exc))
+    _record_or_undo(store, paths_before, (phase, PARAMS_BRANCH_KEY.format(phase=phase, slug=slug), old_version,
+                                          saved.version, initials, why))
     git = _commit(store, f"voyagerparams: {phase} branch {slug} {saved.version} by {initials}: {description}")
     return jsonify({"ok": True, "file": _file_dict(saved, store), "git": git})
 
@@ -1096,13 +1144,17 @@ def api_params_default():
     description = _text(body, "description", required=True)
     store = _store()
     values = _values_from_body(dict(body, base_ref="default"), phase, store)
+    paths_before = store.pending_paths
     try:
-        level = ps.classify_change(ps.flatten(store.load(phase, "default").values), ps.flatten(values))
+        current = store.load(phase, "default")
+        level = ps.classify_change(ps.flatten(current.values), ps.flatten(values))
         saved = store.save_default(phase, values, description, initials)
     except ps.StoreLocked as exc:
         raise RequestError(str(exc), HTTP_CONFLICT)
     except (TypeError, ValueError, FileNotFoundError) as exc:
         raise RequestError(str(exc))
+    _record_or_undo(store, paths_before, (phase, PARAMS_DEFAULT_KEY.format(phase=phase), current.version,
+                                          saved.version, initials, description))
     git = _commit(store, f"voyagerparams: {phase} default {saved.version} ({level}) by {initials}: {description}")
     return jsonify({"ok": True, "file": _file_dict(saved, store), "level": level, "git": git})
 
@@ -1137,5 +1189,5 @@ __all__ = [
     "voyager_tools_bp", "deps", "Deps", "RequestError", "fragment_payload", "fragment_status", "guarded",
     "slice_section", "render_markdown", "lock_body_html", "lock_page_html", "admin_body_html",
     "URL_PREFIX", "MODULE_SLUG", "DISPLAY_NAME", "UI_STYLE", "ASSET_VERSION", "ROOT_SECTION_PREFIX",
-    "LOCK_MESSAGE", "ADMIN_ERROR", "ADMIN_MESSAGE", "PROMPTS_DOC",
+    "LOCK_MESSAGE", "ADMIN_ERROR", "ADMIN_MESSAGE", "PROMPTS_DOC", "PARAMS_HISTORY_ONLY_ON_DESKTOP",
 ]

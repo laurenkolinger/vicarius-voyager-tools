@@ -1,9 +1,8 @@
 # ==============================================================================
 # MODULE INTERFACE DEFINITION: voyager_tools
 # ==============================================================================
-# The Atlas control panel (module voyager_tools, display name since program C
-# milestone C3; the slug, the address /voyager-tools and the actor prefix
-# stay): the restricted settings and tools of the atlas, the Voyager runs, the
+# The Atlas control panel (module voyager_tools; the slug, the address
+# /voyager-tools and the actor prefix keep the module name): the restricted settings and tools of the atlas, the Voyager runs, the
 # manual edit and the desktop (atlas processing order, camera model, prompts
 # doc, manual edit settings, Shelf copy, clean manual edit run, Voyager runs,
 # parameter defaults, rewind, spot redo, clean workbench, module locks, module

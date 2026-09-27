@@ -44,10 +44,17 @@ sys.path.insert(0, str(CLONE))
 from voyagertools import views  # noqa: E402
 
 PANEL_JS = CLONE / "static" / "voyager_tools.js"
+PANEL_CSS = CLONE / "static" / "voyager_tools.css"
+SHARED_CSS = CLONE / "static" / "vicarius_workflow.css"
+ROLES_CSS = CLONE / "static" / "vicarius_roles.css"
+# The desktop's global sheet, beside the module tree (vicarius_ui_os/static).
+DESKTOP_THEME_CSS = CLONE.parents[3] / "vicarius_ui_os" / "static" / "theme.css"
 SETTINGS_JS = CLONE / "static" / "vt_settings.js"
 CHROME = "/usr/bin/google-chrome"
 SAVED_AT = "2026-09-26T21:54:25-04:00"
 STALE_LINE = "These settings changed since the pane was opened; reload the pane and save again."
+DEFAULT_BUDGET_MS = 20000
+TIMEOUT_BUDGET_MS = 60000  # past the panel's 30 s request timeout
 
 
 def field(key, label, kind, **extra):
@@ -79,9 +86,10 @@ SHELF = {
 }
 RUNS = {
     "store": "voyager_config", "saved_at": None, "saved_by": None, "drift": [], "has_voyager2": False,
-    "fields": [field("voyager1.run_enabled", "Run Voyager 1 batches", "boolean", confirm=True, reason_required=True),
-               field("voyager1.delete_from_workbench_default", "Delete from the Workbench by default (Voyager 1)",
-                     "boolean")],
+    "fields": [field("voyager1.run_enabled", "Run Voyager 1 batches", "boolean", confirm=True, reason_required=True,
+                     group="Voyager 1"),
+               field("voyager1.delete_from_workbench_default", "Delete from the Workbench", "boolean",
+                     group="Voyager 1", history_label="Delete from the Workbench (Voyager 1)")],
     "values": {"voyager1.run_enabled": True, "voyager1.delete_from_workbench_default": False},
 }
 FLOORS = {
@@ -110,7 +118,10 @@ LADDER = {"tiers": [{"name": "voyager", "label": "VOYAGER", "kind": "model", "mo
           "updated": "2026-09-27 05:30 AST", "fallback": False, "error": "", "has_editor_tier": False}
 CLAIMS = {"claims": {"c1": {"tier": "vega", "module": "reef_point_seg", "run_id": "train_1", "pid": 42, "by": "LO",
                             "cards": [0], "started": "2026-09-27T09:00:00-04:00"}},
-          "unclaimed": {}, "last_refusal": None, "ladder": {}}
+          "unclaimed": {"2007884": {"process": "/mnt/rip/vicarius_drive/vicarius/modules/reef_point_seg/github_repo/env/bin/python -u "
+                                            "/home/bizon/.config/Ultralytics/DDP/_temp_ddp.py --epochs 5",
+                                 "cards": [0, 1], "used_mb": 10240}},
+          "last_refusal": None, "ladder": {}}
 LOCKS = {"locks": {"tagfab": {"locked": True, "by": "LO", "ts": "2026-09-20T10:00:00-04:00"}}}
 MODULES = [{"name": "tagfab", "display_name": "TagFab", "category": "AI", "status": "active", "pipeline_stage": "ingest"},
            {"name": "manual_edit", "display_name": "Start manual edit", "category": "3D", "status": "active"}]
@@ -148,13 +159,23 @@ STUB = r"""
 <script>
 (function () {
   window.__CALLS__ = [];
-  function answer(spec) {
+  // answer(spec, signal): {status, body} answers once; {empty: true} answers
+  // a body that is not JSON; {hang: true} never answers and rejects with an
+  // AbortError when the caller's signal aborts (the 30 s timeout).
+  function answer(spec, signal) {
+    if (spec.hang) {
+      return new Promise(function (resolve, reject) {
+        if (signal) signal.addEventListener('abort', function () {
+          var err = new Error('aborted'); err.name = 'AbortError'; reject(err);
+        });
+      });
+    }
     var status = spec.status || 200;
     var body = spec.body === undefined ? {} : spec.body;
     return Promise.resolve({ ok: status >= 200 && status < 300, status: status,
       headers: { get: function () { return 'application/json'; } },
-      json: function () { return Promise.resolve(body); },
-      text: function () { return Promise.resolve(JSON.stringify(body)); } });
+      json: function () { return spec.empty ? Promise.reject(new SyntaxError('Unexpected end of JSON input')) : Promise.resolve(body); },
+      text: function () { return Promise.resolve(spec.empty ? '' : JSON.stringify(body)); } });
   }
   window.fetch = function (url, opts) {
     var method = (opts && opts.method) || 'GET';
@@ -169,7 +190,7 @@ STUB = r"""
       if (parts[0] === method && u.indexOf(parts[1]) === 0) {
         var list = routes[keys[i]];
         var spec = list.length > 1 ? list.shift() : list[0];
-        return answer(spec);
+        return answer(spec, opts && opts.signal);
       }
     }
     return answer({ status: 404, body: { error: 'Not found' } });
@@ -221,27 +242,40 @@ class PanesCase(unittest.TestCase):
         }
 
     def run_steps(self, name: str, steps: str, routes: dict | None = None, settings_first: bool = False,
-                  wrap: bool = False, initials: str = "lo") -> dict:
-        """Build the harness, run it in Chrome, and return the results the steps reported."""
+                  wrap: bool = False, initials: str | None = "lo", head_js: str = "",
+                  budget_ms: int = DEFAULT_BUDGET_MS, desktop_theme: bool = False) -> dict:
+        """Build the harness, run it in Chrome, and return the results the steps reported.
+
+        initials=None leaves the initials field as the panel seeded it;
+        head_js runs before the panel scripts (a fake desktop global, a
+        session value); budget_ms is Chrome's virtual time budget;
+        desktop_theme links the desktop's global sheet first, as a desktop
+        window has it. The panel's own sheets are always linked.
+        """
         routing = "<script>window.__ROUTES__ = " + json.dumps(routes or self.base_routes()) + ";</script>"
         section = f'<div class="win-body">{self.section}</div>' if wrap else self.section
         scripts = [SETTINGS_JS, PANEL_JS] if settings_first else [PANEL_JS, SETTINGS_JS]
         tags = "".join(f'<script src="file://{path}"></script>' for path in scripts)
         body = ("(async function(){ var results = {};"
                 "var pre = document.createElement('pre'); pre.id = 'results'; document.body.appendChild(pre);"
-                f"try {{ var box = q('#vt-initials'); if (box) setInput(box, {json.dumps(initials)});"
+                + ("try { " if initials is None else
+                   f"try {{ var box = q('#vt-initials'); if (box) setInput(box, {json.dumps(initials)});")
                 + steps +
                 "} catch (e) { results.__error = String(e && e.stack || e); }"
                 "results.__done = 'yes'; pre.textContent = JSON.stringify(results); })();")
-        page = ("<!doctype html><html><head><meta charset=\"utf-8\"><title>panes</title></head><body>"
-                + STUB + routing + section + tags + "<script>" + PRELUDE + "</script>"
+        head = f"<script>{head_js}</script>" if head_js else ""
+        sheets = ([DESKTOP_THEME_CSS] if desktop_theme else []) + [SHARED_CSS, ROLES_CSS]
+        links = "".join(f'<link rel="stylesheet" href="file://{path}">' for path in sheets)
+        links += f'<link rel="stylesheet" data-vt-css="1" href="file://{PANEL_CSS}">'
+        page = ("<!doctype html><html><head><meta charset=\"utf-8\"><title>panes</title>" + links + "</head><body>"
+                + STUB + routing + head + section + tags + "<script>" + PRELUDE + "</script>"
                 + "<script>window.addEventListener('load', function () { setTimeout(function () {" + body
                 + "}, 50); });</script></body></html>")
         path = self.tmp / f"harness_{name}.html"
         path.write_text(page, encoding="utf-8")
         profile = self.tmp / f"{name}_profile"
         cmd = [CHROME, "--headless=new", "--disable-gpu", "--no-sandbox", "--hide-scrollbars",
-               "--window-size=1280,1600", f"--user-data-dir={profile}", "--virtual-time-budget=20000",
+               "--window-size=1280,1600", f"--user-data-dir={profile}", f"--virtual-time-budget={budget_ms}",
                "--dump-dom", f"file://{path}"]
         done = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         match = re.search(r'<pre id="results">(.*?)</pre>', done.stdout, re.DOTALL)
@@ -319,6 +353,70 @@ class ManualEditPane(PanesCase):
         """.replace("__STALE__", STALE_LINE)
         self.run_steps("me_refusals", steps, routes)
 
+    def test_a_save_with_no_answer_stays_disabled_until_the_pane_reloads(self):
+        routes = self.base_routes()
+        routes["POST /api/settings/manual-edit"] = [{"hang": True}]
+        steps = r"""
+        showPane('settings');
+        await waitFor(function () { return qa('[data-vt="settings-fields"] [data-vt-key]').length === 4; });
+        var save = vt('settings-save');
+        setInput(q('[data-vt-key="scale_error_max_mm"]'), '5');
+        save.click();
+        check(results, 'timeout_line', await waitFor(function () { return /may still have happened/.test(vt('settings-result').textContent); }, 45000),
+              vt('settings-result').textContent);
+        check(results, 'still_disabled', save.disabled === true);
+        setInput(q('[data-vt-key="markers_per_chunk"]'), '5');
+        check(results, 'disabled_after_an_edit', save.disabled === true);
+        save.click();
+        await sleep(50);
+        check(results, 'one_post_only', calls('POST', '/api/settings/manual-edit').length === 1);
+        var reload = q('[data-vt="settings-result"] [data-vt-reload]');
+        check(results, 'reload_button', !!reload);
+        var reads = calls('GET', '/api/settings/manual-edit').length;
+        reload.click();
+        check(results, 'reloaded', await waitFor(function () { return calls('GET', '/api/settings/manual-edit').length === reads + 1; }));
+        await sleep(50);
+        setInput(q('[data-vt-key="scale_error_max_mm"]'), '6');
+        check(results, 'enabled_after_reload', save.disabled === false);
+        """
+        self.run_steps("me_timeout", steps, routes, budget_ms=TIMEOUT_BUDGET_MS)
+
+    def test_a_502_with_an_empty_body_names_the_status_and_changes_nothing(self):
+        routes = self.base_routes()
+        routes["POST /api/settings/manual-edit"] = [{"status": 502, "empty": True}]
+        steps = r"""
+        showPane('settings');
+        await waitFor(function () { return qa('[data-vt="settings-fields"] [data-vt-key]').length === 4; });
+        setInput(q('[data-vt-key="scale_error_max_mm"]'), '5');
+        vt('settings-save').click();
+        await waitFor(function () { return vt('settings-result').textContent.length > 0; });
+        check(results, 'line', vt('settings-result').textContent === 'The desktop answered 502; nothing on this pane changed.', vt('settings-result').textContent);
+        check(results, 'error', vt('settings-result').classList.contains('result-error'));
+        check(results, 'enabled_again', vt('settings-save').disabled === false);
+        """
+        self.run_steps("me_502", steps, routes)
+
+    def test_an_empty_session_leaves_the_initials_empty_and_posts_nothing(self):
+        head = "window.VICBOOT = { getInitials: function () { return 'LO'; } };"
+        steps = r"""
+        check(results, 'empty_field', q('#vt-initials').value === '', q('#vt-initials').value);
+        showPane('settings');
+        await waitFor(function () { return qa('[data-vt="settings-fields"] [data-vt-key]').length === 4; });
+        setInput(q('[data-vt-key="scale_error_max_mm"]'), '5');
+        vt('settings-save').click();
+        await sleep(100);
+        check(results, 'initials_line', vt('settings-result').textContent === 'Type your initials, two to four letters, at the top of the panel.', vt('settings-result').textContent);
+        check(results, 'no_post', calls('POST', '/api/settings/').length === 0);
+        """
+        self.run_steps("me_no_initials", steps, initials=None, head_js=head)
+
+    def test_the_session_initials_seed_the_field(self):
+        head = "try { sessionStorage.setItem('vic_initials', 'jd'); } catch (e) {} window.VICBOOT = { getInitials: function () { return 'LO'; } };"
+        steps = r"""
+        check(results, 'seeded', q('#vt-initials').value === 'JD', q('#vt-initials').value);
+        """
+        self.run_steps("me_session_initials", steps, initials=None, head_js=head)
+
     def test_drift_line_and_record_as_found(self):
         drifted = dict(MANUAL_EDIT, drift=[{"key": "scale_error_max_mm", "disk": "5.0", "history": "4.94"}])
         routes = self.base_routes()
@@ -392,6 +490,7 @@ class ShelfAndRunsAndFloors(PanesCase):
         var text = dialog().textContent;
         check(results, 'consequence', text.indexOf('Overwrite the Shelf copy: each uploaded folder replaces its Shelf folder under /volume6/Archive8_12TB/driver_deposits, files the edit removed are deleted there, and once the bench copy is removed after the verify no pre-edit copy is kept anywhere.') !== -1, text);
         check(results, 'old_new', text.indexOf('Archive the Shelf copy') !== -1 && text.indexOf('Overwrite the Shelf copy') !== -1, text);
+        check(results, 'overwrite_ok_is_danger', q('[data-vt-dialog="ok"]').classList.contains('btn-danger'));
         check(results, 'no_post_before_ok', calls('POST', '/api/settings/shelf').length === 0);
         q('[data-vt-dialog="ok"]').click();
         await waitFor(function () { return calls('POST', '/api/settings/shelf').length === 1; });
@@ -415,7 +514,9 @@ class ShelfAndRunsAndFloors(PanesCase):
         check(results, 'disabled', over.disabled === true);
         var label = over.closest('label');
         check(results, 'no_pointer', getComputedStyle(label).cursor !== 'pointer', getComputedStyle(label).cursor);
-        check(results, 'reason_in_tip', (label.getAttribute('title') || '').indexOf('cannot be chosen until') !== -1, label.getAttribute('title'));
+        var glyph = label.parentNode.querySelector('button.tip');
+        check(results, 'reason_on_a_glyph', !!glyph && (glyph.getAttribute('title') || '').indexOf('cannot be chosen until') !== -1, glyph && glyph.getAttribute('title'));
+        check(results, 'glyph_focusable', !!glyph && glyph.tabIndex === 0);
         """
         self.run_steps("shelf_disabled", steps, routes)
 
@@ -428,7 +529,16 @@ class ShelfAndRunsAndFloors(PanesCase):
         showPane('runs');
         await waitFor(function () { return qa('[data-vt="runs-fields"] [data-vt-key]').length === 2; });
         check(results, 'v2_chip', vt('runs-v2').hidden === false);
+        check(results, 'v2_chip_words', vt('runs-v2').textContent.indexOf('Voyager 2 settings appear with the Voyager 2 window.') !== -1, vt('runs-v2').textContent);
+        var heads = qa('[data-vt="runs-fields"] h3.vt-field-group').map(function (h) { return h.textContent; });
+        check(results, 'sub_heading', JSON.stringify(heads) === '["Voyager 1"]', JSON.stringify(heads));
+        var label = q('label[for="' + q('[data-vt-key="voyager1.delete_from_workbench_default"]').id + '"]');
+        check(results, 'short_label', label.textContent === 'Delete from the Workbench', label.textContent);
+        var box = q('[data-vt-key="voyager1.delete_from_workbench_default"]');
+        var word = box.closest('label').querySelector('[data-vt-onoff]');
+        check(results, 'off_word', word.textContent === 'Off', word.textContent);
         tick(q('[data-vt-key="voyager1.delete_from_workbench_default"]'), true);
+        check(results, 'on_word', word.textContent === 'On', word.textContent);
         vt('runs-save').click();
         await waitFor(function () { return calls('POST', '/api/settings/voyager').length === 1; });
         check(results, 'no_dialog_for_default', !dialog());
@@ -443,6 +553,7 @@ class ShelfAndRunsAndFloors(PanesCase):
         check(results, 'dialog', await waitFor(function () { return !!dialog(); }));
         var text = dialog().textContent;
         check(results, 'names_old_and_new', text.indexOf('Run Voyager 1 batches: on to off') !== -1, text);
+        check(results, 'switch_ok_is_primary', q('[data-vt-dialog="ok"]').classList.contains('btn-primary'));
         q('[data-vt-dialog="ok"]').click();
         await waitFor(function () { return calls('POST', '/api/settings/voyager').length === 2; });
         var second = calls('POST', '/api/settings/voyager')[1].body;
@@ -493,6 +604,53 @@ class ShelfAndRunsAndFloors(PanesCase):
 
 
 class ReadOnlyAndHistoryPanes(PanesCase):
+    def test_history_values_csv_button_and_day_filter(self):
+        routes = self.base_routes()
+        rows = [{"at": "2026-09-27T10:12:03-04:00", "by": "LO", "store": "voyager_config", "key": "voyager1.run_enabled",
+                 "old": "true", "new": "false", "reason": "NAS maintenance over the weekend while the volume is scrubbed and checked",
+                 "label": "Run Voyager 1 batches"},
+                {"at": "2026-09-27T10:10:00-04:00", "by": "LO", "store": "manual_edit", "key": "edit_bench_default",
+                 "old": '"/mnt/rip/driver_staging/editbench"', "new": '"/mnt/rip/driver_staging/editbench_two"',
+                 "reason": "new disk", "label": "Edit bench default"}]
+        routes["GET /api/settings/history"] = [{"body": {"rows": [], "total": 0, "skipped": 0, "conflict_copies": []}},
+                                               {"body": {"rows": rows, "total": 2, "skipped": 0, "conflict_copies": []}}]
+        steps = r"""
+        q('.voyager-tools').style.width = '340px';  // the table squeezed, as in a narrow window
+        showPane('history');
+        await waitFor(function () { return calls('GET', '/api/settings/history').length === 1; });
+        await sleep(50);
+        check(results, 'csv_disabled_when_empty', vt('history-csv').disabled === true);
+        vt('history-refresh').click();
+        await waitFor(function () { return qa('[data-vt="history-body"] tr').length === 2; });
+        check(results, 'csv_enabled', vt('history-csv').disabled === false);
+        var cells = qa('[data-vt="history-body"] tr')[0].querySelectorAll('td.vt-value');
+        check(results, 'short_class', cells[1].classList.contains('is-short') && cells[1].textContent === 'false');
+        var path = qa('[data-vt="history-body"] tr')[1].querySelector('td.vt-value');
+        check(results, 'long_class', path.classList.contains('is-long'));
+        var range = document.createRange();
+        range.selectNodeContents(cells[1]);
+        check(results, 'false_on_one_line', range.getClientRects().length === 1, String(range.getClientRects().length));
+        // Chrome's fallback fonts here are narrower than the page's, so the
+        // rule itself is pinned too: a short value never breaks inside a word.
+        check(results, 'short_nowrap', getComputedStyle(cells[1]).whiteSpace === 'nowrap', getComputedStyle(cells[1]).whiteSpace);
+        check(results, 'long_breaks', getComputedStyle(path).overflowWrap === 'anywhere', getComputedStyle(path).overflowWrap);
+
+        setInput(vt('history-since'), '09/27/2026');
+        await sleep(50);
+        check(results, 'bad_day_line', vt('history-result').textContent === 'Type the first day as YYYY-MM-DD, for example 2026-09-27.', vt('history-result').textContent);
+        check(results, 'bad_day_no_query', calls('GET', '/api/settings/history').length === 2);
+        setInput(vt('history-since'), '2026-09-27');
+        await waitFor(function () { return calls('GET', '/api/settings/history').length === 3; });
+        check(results, 'day_query', calls('GET', '/api/settings/history')[2].url.indexOf('since=2026-09-27') !== -1);
+        check(results, 'line_cleared', vt('history-result').textContent === '');
+        var key = vt('history-key');
+        key.value = 'run_';
+        key.dispatchEvent(new Event('input', {bubbles: true}));
+        check(results, 'key_debounced', await waitFor(function () { return calls('GET', '/api/settings/history').length === 4; }));
+        check(results, 'key_query', calls('GET', '/api/settings/history')[3].url.indexOf('key=run_') !== -1);
+        """
+        self.run_steps("history_values", steps, routes)
+
     def test_history_table_filters_and_problem_lines(self):
         steps = r"""
         showPane('history');
@@ -528,7 +686,12 @@ class ReadOnlyAndHistoryPanes(PanesCase):
         check(results, 'gpu_meta', vt('gpu-meta').textContent.indexOf('/mnt/rip/vicarius_drive/vicarius/_METADATA/gpu_ladder.yaml') !== -1, vt('gpu-meta').textContent);
         check(results, 'editor_line', vt('gpu-editor-line').hidden === false);
         check(results, 'memory_words', vt('gpu-tiers').textContent.indexOf('starts beside a manual edit window with 24000 MB free on every card and 160 GB of memory available, memory pressure at most 5 percent') !== -1, vt('gpu-tiers').textContent);
-        check(results, 'claims', await waitFor(function () { return qa('[data-vt="gpu-claims"] .row').length === 1; }));
+        check(results, 'claims', await waitFor(function () { return qa('[data-vt="gpu-claims"] .row').length === 2; }));
+        var loose = qa('[data-vt="gpu-claims"] .row')[1].querySelector('.row-name');
+        check(results, 'short_name', loose.textContent.indexOf('python _temp_ddp.py') === 0 && loose.textContent.indexOf('pid 2007884') !== -1, loose.textContent);
+        check(results, 'full_command_in_title', (loose.getAttribute('title') || '').indexOf('/home/bizon/.config/Ultralytics/DDP/_temp_ddp.py') !== -1);
+        var chip = loose.querySelector('.id');
+        check(results, 'pid_visible', chip.getBoundingClientRect().right <= loose.getBoundingClientRect().right + 1, String(chip.getBoundingClientRect().right));
         showPane('locks');
         await waitFor(function () { return qa('[data-vt="locks-body"] .row').length === 2; });
         var locked = qa('[data-vt="locks-body"] .row').filter(function (r) { return r.textContent.indexOf('TagFab') !== -1; })[0];
@@ -536,6 +699,11 @@ class ReadOnlyAndHistoryPanes(PanesCase):
         check(results, 'no_lock_buttons', qa('[data-vt="locks-body"] button').length === 0);
         showPane('modules');
         check(results, 'modules', await waitFor(function () { return qa('[data-vt="modules-body"] .row').length === 2; }));
+        var tag = qa('[data-vt="modules-body"] .row').filter(function (r) { return r.textContent.indexOf('TagFab') !== -1; })[0];
+        check(results, 'facts_named', tag.textContent.indexOf('category AI') !== -1 && tag.textContent.indexOf('stage ingest') !== -1 &&
+              tag.textContent.indexOf('status active') !== -1, tag.textContent);
+        showPane('locks');
+        check(results, 'locks_pointer', vt('locks-body').previousElementSibling.textContent.indexOf('padlock') !== -1);
         showPane('appearance');
         await waitFor(function () { return qa('[data-vt="appearance-body"] div').length >= 6; });
         var text = vt('appearance-body').textContent;
@@ -562,6 +730,41 @@ class Seam(PanesCase):
         again.unmount();
         """
         self.run_steps("seam", steps, settings_first=True, wrap=True)
+
+    def test_labels_read_as_body_text_under_the_desktop_sheet(self):
+        if not DESKTOP_THEME_CSS.exists():
+            self.skipTest("the desktop's theme.css is not beside this clone")
+        steps = r"""
+        window.VoyagerTools.mount(q('.win-body'), {pane: 'settings'});
+        check(results, 'mounted', await waitFor(function () { return qa('[data-vt="settings-fields"] [data-vt-key]').length === 4; }));
+        var labels = qa('.voyager-tools dt label').concat(qa('.voyager-tools label.opt'));
+        check(results, 'some_labels', labels.length >= 5, String(labels.length));
+        labels.forEach(function (label, i) {
+          var cs = getComputedStyle(label);
+          check(results, 'case_' + i, cs.textTransform === 'none', label.textContent + ' ' + cs.textTransform);
+          check(results, 'size_' + i, parseFloat(cs.fontSize) >= 12, label.textContent + ' ' + cs.fontSize);
+          check(results, 'margin_' + i, cs.marginTop === '0px', label.textContent + ' ' + cs.marginTop);
+        });
+        var glyph = q('[data-vt-row="scale_error_max_mm"] dt .tip');
+        var text = q('[data-vt-row="scale_error_max_mm"] dt label');
+        check(results, 'glyph_follows_label', glyph.getBoundingClientRect().left - text.getBoundingClientRect().right < 12,
+              String(glyph.getBoundingClientRect().left - text.getBoundingClientRect().right));
+        """
+        self.run_steps("desktop_labels", steps, desktop_theme=True, wrap=True)
+
+    def test_a_panel_removed_without_unmount_is_forgotten(self):
+        steps = r"""
+        var host = q('.win-body');
+        window.VoyagerTools.mountPanel(host, {pane: 'history'});
+        await waitFor(function () { return q('#vt-history').hidden === false; });
+        var root = host.querySelector('.voyager-tools');
+        root.querySelector('.vt-panes').insertAdjacentHTML('beforeend', '<section class="vt-pane" id="vt-zzprobe" hidden></section>');
+        host.parentNode.removeChild(host);
+        var inits = 0;
+        window.VoyagerTools.registerPane('zzprobe', function () { inits += 1; return function () {}; });
+        check(results, 'no_init_in_a_detached_panel', inits === 0, String(inits));
+        """
+        self.run_steps("prune", steps, wrap=True)
 
 
 if __name__ == "__main__":

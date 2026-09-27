@@ -184,6 +184,8 @@ class ToolsCase(unittest.TestCase):
         d.site_name = lambda code: {"MRS": "Meri Shoal", "LBH": "Lang Bank Red Hind FSA"}.get(code, "")
         d.prompts_doc = lambda: self.prompts
         d.now_iso = lambda: "2026-09-04T01:00:00-04:00"
+        self.history_lines = []
+        d.record_setting = lambda *line: self.history_lines.append(line) or "2026-09-04T01:00:00-04:00"
 
         app = Flask(__name__)
         app.secret_key = "test"
@@ -747,6 +749,7 @@ class ParamsRoutes(ToolsCase):
         self.assertTrue(r.get_json()["git"]["committed"])
         self.assertFalse(r.get_json()["git"]["pushed"])
         self.assertTrue(any(c[:1] == ["commit"] for c in self.git.calls))
+        self.assertEqual(self.history_lines, [("voyager1", "voyager1/branches/fast", None, "v1.0.0", "LO", "speed")])
         r = self.client.post("/voyager-tools/api/params/branch", json={
             "phase": "voyager1", "values": values, "slug": "Bad Slug", "description": "d", "why": "w", "initials": "LO"})
         self.assertEqual(r.status_code, 400)

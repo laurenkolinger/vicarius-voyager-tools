@@ -93,11 +93,35 @@
   // registerPane(key, init): make a pane available to every panel. init(ctx)
   // runs once per mount and returns the pane's loader (called when the pane
   // is first shown, and again after a relock ends).
+  //
+  // The pane context (ctx) a pane receives: root, pane, base, key; api(path,
+  // options) for this blueprint and desktopApi(path, options) for the
+  // desktop's own routes, both answering {ok, status, data}; initials(resEl),
+  // confirmDialog(spec), setResult, busy, fail, esc, q, qa, idChip,
+  // stampWords; onStop(fn), where fn stops the pane's timers and outside
+  // listeners (it plays the part of spec 5.3's onLocked); isRelocked();
+  // isShown(). Register onStop inside init: each fn runs at every relock and
+  // at unmount, stays registered for the next relock, and must be safe to
+  // run more than once.
   function registerPane(key, init) {
     if (typeof key !== "string" || !PANE_KEY_RE.test(key)) throw new Error("registerPane: the pane key must be a short lowercase name, got " + key);
     if (typeof init !== "function") throw new Error("registerPane: the initialiser of pane " + key + " must be a function");
     PANES[key] = init;
+    pruneDetached();
     instances.forEach(function (inst) { inst.initPane(key); });
+  }
+
+  // pruneDetached(): forget panels whose section was on the page and left
+  // it without an unmount (a desktop window closed by its frame), so their
+  // closures are freed and a later registration never initialises a pane in
+  // them. A panel mounted before its host was attached is kept.
+  function pruneDetached() {
+    for (var i = instances.length - 1; i >= 0; i--) {
+      var inst = instances[i];
+      var attached = !!document.body && document.body.contains(inst.root);
+      if (attached) inst.wasAttached = true;
+      else if (inst.wasAttached) instances.splice(i, 1);
+    }
   }
   var LINE_TIMEOUT = "No answer from the desktop after 30 s; the action may still have happened. Reload the pane before trying again.";
 
@@ -294,22 +318,29 @@
       });
     }
 
+    // fail(resEl, res, fallback): the refusal line of a request. The server's
+    // own error or message wins, then the caller's fallback; a body with
+    // neither (a 5xx from a proxy, a crash page) names the status.
     function fail(resEl, res, fallback) {
-      var message = (res.data && res.data.error) || fallback || ("Request failed (" + res.status + ")");
+      var data = res.data || {};
+      var message = data.error || data.message || fallback || ("The desktop answered " + res.status + "; nothing on this pane changed.");
       var html = esc(message);
-      if (res.data && res.data.pullback_command) html += "<pre>" + esc(res.data.pullback_command) + "</pre>";
-      if (res.data && res.data.problems && res.data.problems.length) {
-        html += "<ul>" + res.data.problems.map(function (p) { return "<li>" + esc(p) + "</li>"; }).join("") + "</ul>";
+      if (data.pullback_command) html += "<pre>" + esc(data.pullback_command) + "</pre>";
+      if (data.problems && data.problems.length) {
+        html += "<ul>" + data.problems.map(function (p) { return "<li>" + esc(p) + "</li>"; }).join("") + "</ul>";
       }
       setResult(resEl, html, "error");
     }
 
     /* -- initials --------------------------------------------------------- */
+    // The field is seeded only from what a person typed: this panel's own
+    // key, then the desktop's session key. Nothing else fills it, so a save
+    // is never signed with initials nobody typed (every settings history
+    // line and registry event carries them).
     var initialsEl = root.querySelector("#vt-initials");
     function initialsSeed() {
       var v = readStore(LS_INITIALS);
       if (!v) { try { v = window.sessionStorage.getItem(SS_INITIALS); } catch (e) { v = null; } }
-      if (!v && window.VICBOOT && typeof window.VICBOOT.getInitials === "function") { try { v = window.VICBOOT.getInitials(); } catch (e) { v = null; } }
       return (v || "").trim().toUpperCase();
     }
     if (initialsEl) {
@@ -415,10 +446,11 @@
     /* -- registered panes ------------------------------------------------------ */
     var paneLoaders = {};
     var stopFns = [];
-    // stopPanes(): run every stop function a pane registered (its timers and
-    // listeners outside the section), on a relock and at unmount.
-    function stopPanes() {
-      var fns = stopFns.splice(0, stopFns.length);
+    // stopPanes(forget): run every stop function a pane registered (its
+    // timers and listeners outside the section), on a relock and at unmount;
+    // they stay registered for the next relock unless forget is true.
+    function stopPanes(forget) {
+      var fns = forget ? stopFns.splice(0, stopFns.length) : stopFns.slice();
       fns.forEach(function (fn) { try { fn(); } catch (e) { /* a pane's own cleanup failed; the rest still run */ } });
     }
     function paneContext(key) {
@@ -435,6 +467,8 @@
       };
     }
     var instance = {
+      root: root,
+      wasAttached: !!document.body && document.body.contains(root),
       initPane: function (key) {
         if (paneLoaders[key] || loaders[key] || !PANES[key] || !root.querySelector("#vt-" + key)) return;
         var made = PANES[key](paneContext(key));
@@ -1290,6 +1324,7 @@
       manual: loadManual, rewind: rewindUi.load, spot: spotUi.load, prompts: loadPrompts, params: loadParams, seasons: loadSeasons
     };
 
+    pruneDetached();
     instances.push(instance);
     Object.keys(PANES).forEach(instance.initPane);
 
@@ -1305,7 +1340,7 @@
     // mounted again. A caller keeps the container, not the section.
     return {
       unmount: function () {
-        stopPanes();
+        stopPanes(true);
         if (stopWatching) { stopWatching(); stopWatching = null; }
         var at = instances.indexOf(instance);
         if (at !== -1) instances.splice(at, 1);

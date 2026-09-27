@@ -20,7 +20,7 @@
            vicarius_roles.css; every other rule is page-specific, scoped
            under .voyager-tools in static/voyager_tools.css.
 #}
-<section class="voyager-tools" id="vt-root" data-vt-base="/voyager-tools" data-vt-version="20260927c">
+<section class="voyager-tools" id="vt-root" data-vt-base="/voyager-tools" data-vt-version="20260927d">
 
   <header class="head">
     <h1 class="title" id="vt-title">Atlas control panel</h1>
@@ -48,7 +48,7 @@
       <button type="button" class="vt-tab" role="tab" data-vt-tab="shelf" aria-controls="vt-shelf" aria-selected="false" title="Show whether an upload archives or overwrites the Shelf copy of a transect, and change it.">Shelf copy</button>
       <button type="button" class="vt-tab" role="tab" data-vt-tab="manual" aria-controls="vt-manual" aria-selected="false" title="Show every unfinished manual edit project and cancel one that went wrong.">Clean manual edit run</button>
       <p class="vt-nav-group" role="presentation">Voyager</p>
-      <button type="button" class="vt-tab" role="tab" data-vt-tab="runs" aria-controls="vt-runs" aria-selected="false" title="Show the switches in front of real Voyager 1 and Voyager 2 batches and the Workbench removal defaults, and change them.">Voyager runs</button>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="runs" aria-controls="vt-runs" aria-selected="false" title="Show the switch in front of real Voyager 1 batches and the Workbench removal default, and change them.">Voyager runs</button>
       <button type="button" class="vt-tab" role="tab" data-vt-tab="params" aria-controls="vt-params" aria-selected="false" title="Show every parameter version and branch in voyagerparams, edit the values, and save a branch or a new default.">Parameter defaults</button>
       <button type="button" class="vt-tab" role="tab" data-vt-tab="rewind" aria-controls="vt-rewind" aria-selected="false" title="Show the rewind: take one timepoint back to before step 1 or before step 0, after a dry run lists what would change.">Rewind</button>
       <button type="button" class="vt-tab" role="tab" data-vt-tab="spot" aria-controls="vt-spot" aria-selected="false" title="Show the spot redo: rewind one timepoint to before step 1 and mark it for another Voyager 1 run.">Spot redo</button>
@@ -230,8 +230,8 @@
             </div>
           </dl>
           <div class="actions">
-            <button type="button" class="btn btn-primary" data-vt="pm-branch" title="Save the values as a file of the named branch and commit and push it to the voyagerparams repository. A branch never moves the default.">Save as branch</button>
-            <button type="button" class="btn btn-danger" data-vt="pm-default" title="Save the values as the next numbered version and point DEFAULT at it, after a confirmation. VICARIUS states the significance, takes a description, then commits and pushes.">Save as default</button>
+            <button type="button" class="btn btn-primary" data-vt="pm-branch" title="Save the values as a file of the named branch and commit and push it to the voyagerparams repository. VICARIUS writes the new version and the why to the settings history, and a branch never moves the default.">Save as branch</button>
+            <button type="button" class="btn btn-danger" data-vt="pm-default" title="Save the values as the next numbered version and point DEFAULT at it, after a confirmation. VICARIUS takes a description, writes the old and new version to the settings history, then commits and pushes.">Save as default</button>
           </div>
         </fieldset>
         <p class="result" data-vt="pm-result" role="status"></p>
@@ -248,7 +248,7 @@
         <p class="result" data-vt="se-result" role="status"></p>
       </section>
 
-      {# 9 to 17. The settings, desktop and history panes (program C milestone C3) #}
+      {# 9 to 17. The settings, desktop and history panes #}
       {% include "voyager_tools/panes_settings.html" %}
 
     </div>

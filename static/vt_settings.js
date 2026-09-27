@@ -1,6 +1,6 @@
 /* static/vt_settings.js - the settings, desktop and history panes of the
- * Atlas control panel (program C spec sections 3.3, 3.4, 4.8, 4.9 and 5.3,
- * milestone C3), registered on the pane seam of static/voyager_tools.js.
+ * Atlas control panel (program C spec sections 3.3, 3.4, 4.8, 4.9 and 5.3),
+ * registered on the pane seam of static/voyager_tools.js.
  *
  * Four settings panes write through the desktop's one write path per store
  * (vicarius_ui_os/settings_views.py): Manual edit settings and Shelf copy
@@ -12,14 +12,17 @@
  * confirmed field changes (with a reason typed first), posts only the
  * changed keys with the saved_at it read, and shows one result line. A drift
  * line names a setting whose file changed outside the write path, with
- * Record as found. The GPU ladder, Module locks, Module details and
+ * Record as found. A save that gets no answer (the 30 s timeout) may still
+ * have happened, so its button stays disabled until the pane reads the
+ * stored values again. The GPU ladder, Module locks, Module details and
  * Appearance panes are read only (the last three open the place that edits
  * them today, until their stores gain a settings history write path); the
  * Settings history pane lists settings_history.csv newest first with
  * filters and Copy as CSV.
  *
  * The pure helpers (fieldsHtml, parseValue, changedKeys, reasonReady,
- * cleanInitials, historyCsv, valueWords, metaLine, driftLines) are exported
+ * cleanInitials, historyCsv, valueWords, valueClass, shortProcess,
+ * metaLine, driftLines) are exported
  * to node through module.exports for tests/test_frontend_pins.py; in a
  * browser the IIFE registers the panes, queueing them on
  * window.VoyagerTools._pendingPanes when this script loads before the seam.
@@ -33,6 +36,10 @@
   var COLOR_RE = /^#[0-9a-fA-F]{6}$/;
   var FORMULA_START_RE = /^[=+\-@]/;
   var HISTORY_LIMIT = 200;
+  var SHORT_VALUE_CHARS = 16;  // a history value this short never breaks inside a word
+  var KEY_FILTER_DEBOUNCE_MS = 300;
+  var DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+  var SCRIPT_RE = /\.(py|sh|R|js)$/;
   var HISTORY_COLUMNS = ["at", "by", "store", "key", "old", "new", "reason"];
   var LS_HISTORY_FILTERS = "vt.history.filters";
   var MODULE_MENU_KEY = "__modules";
@@ -55,6 +62,8 @@
   var LINE_NO_EDITOR_TIER = "The ladder file does not list the manual edit window tier yet.";
   var LINE_DRIFT_REASON = "Type a reason before recording the change as found.";
   var LINE_ARCHIVE = "Archive the Shelf copy: before each upload the Shelf folder is renamed to <folder>_voy1_archive and kept.";
+  var TIP_RELOAD = "Read the stored values again to see whether the save happened.";
+  var LINE_BAD_DAY = "Type the first day as YYYY-MM-DD, for example 2026-09-27.";
   var LINE_SHELF_FIELD_TIP = "Pick whether an upload keeps the pre-edit Shelf folder or replaces it. VICARIUS asks for a reason and a confirmation for either change.";
 
   /* ---- pure helpers (exported to node) ------------------------------------ */
@@ -90,35 +99,55 @@
         esc(value == null ? "" : String(value)) + '">' + (field.unit ? ' <span class="count">' + esc(field.unit) + "</span>" : "");
     }
     if (kind === "boolean") {
-      return '<label class="opt"><input type="checkbox" id="' + id + '"' + key + (value === true ? " checked" : "") + "> <span>On</span></label>";
+      return '<label class="opt"><input type="checkbox" id="' + id + '"' + key + (value === true ? " checked" : "") +
+        "> <span data-vt-onoff>" + onOffWord(value === true) + "</span></label>";
     }
     if (kind === "color") {
       return '<input type="color" id="' + id + '" class="vt-color"' + key + ' value="' + esc(COLOR_RE.test(value || "") ? value : "#000000") + '">';
     }
     if (kind === "choice") {
+      // Each option carries its own "?" glyph; a disabled option's glyph
+      // says why it cannot be chosen.
       return '<div class="opts">' + (field.options || []).map(function (opt) {
         var disabled = opt.disabled === true;
         var tip = disabled ? (opt.disabled_reason || opt.tip) : opt.tip;
-        return '<label class="opt' + (disabled ? " is-disabled" : "") + '" title="' + esc(tip || "") + '"><input type="radio" name="' + id + '"' + key +
+        var glyph = tip ? '<button type="button" class="tip" aria-label="About ' + esc(opt.label) + '" title="' + esc(tip) + '"><span>?</span></button>' : "";
+        return '<span class="vt-opt-row"><label class="opt' + (disabled ? " is-disabled" : "") + '"><input type="radio" name="' + id + '"' + key +
           ' value="' + esc(JSON.stringify(opt.value)) + '"' + (opt.value === value ? " checked" : "") + (disabled ? " disabled" : "") + "> " +
-          esc(opt.label) + "</label>";
+          esc(opt.label) + "</label>" + glyph + "</span>";
       }).join("") + "</div>";
     }
     return '<input type="text" id="' + id + '" class="vt-field w-path"' + key + ' maxlength="4096" autocomplete="off" spellcheck="false" value="' +
       esc(value == null ? "" : String(value)) + '">';
   }
 
-  // fieldsHtml(prefix, fields, values): one definition-list row per field,
-  // the label and its "?" glyph at the left, the control at the right.
+  function onOffWord(on) { return on ? "On" : "Off"; }
+
+  // rowHtml(prefix, field, index, vals): one definition-list row, the label
+  // and its "?" glyph in one inline run at the left (so the glyph follows
+  // the last word of a wrapped label), the control at the right.
+  function rowHtml(prefix, field, index, vals) {
+    var id = "vt-" + esc(prefix) + "-f" + index;
+    var glyph = '<button type="button" class="tip" aria-label="About ' + esc(field.label) + '" title="' + esc(field.tip) + '"><span>?</span></button>';
+    var head = field.type === "choice"
+      ? '<dt><span class="vt-dt-flow"><span id="' + id + '-l">' + esc(field.label) + "</span>" + glyph + '</span></dt><dd role="radiogroup" aria-labelledby="' + id + '-l">'
+      : '<dt><span class="vt-dt-flow"><label for="' + id + '">' + esc(field.label) + "</label>" + glyph + "</span></dt><dd>";
+    return '<div class="vt-setting" data-vt-row="' + esc(field.key) + '">' + head + controlHtml(id, field, vals[field.key]) + "</dd></div>";
+  }
+
+  // fieldsHtml(prefix, fields, values): the rows as definition lists, one
+  // per run of fields sharing a group, each group under its sub-heading.
   function fieldsHtml(prefix, fields, values) {
     var vals = values || {};
-    return (fields || []).map(function (field, index) {
-      var id = "vt-" + esc(prefix) + "-f" + index;
-      var glyph = '<button type="button" class="tip" aria-label="About ' + esc(field.label) + '" title="' + esc(field.tip) + '"><span>?</span></button>';
-      var head = field.type === "choice"
-        ? '<dt><span id="' + id + '-l">' + esc(field.label) + "</span>" + glyph + '</dt><dd role="radiogroup" aria-labelledby="' + id + '-l">'
-        : '<dt><label for="' + id + '">' + esc(field.label) + "</label>" + glyph + "</dt><dd>";
-      return '<div class="vt-setting" data-vt-row="' + esc(field.key) + '">' + head + controlHtml(id, field, vals[field.key]) + "</dd></div>";
+    var groups = [];
+    (fields || []).forEach(function (field, index) {
+      var name = typeof field.group === "string" ? field.group : "";
+      var last = groups[groups.length - 1];
+      if (!last || last.name !== name) { last = { name: name, rows: [] }; groups.push(last); }
+      last.rows.push(rowHtml(prefix, field, index, vals));
+    });
+    return groups.map(function (group) {
+      return (group.name ? '<h3 class="vt-field-group">' + esc(group.name) + "</h3>" : "") + '<dl class="choices">' + group.rows.join("") + "</dl>";
     }).join("");
   }
 
@@ -206,6 +235,27 @@
     return JSON.stringify(parsed);
   }
 
+  // valueClass(jsonText): "is-short" for a history value that fits on one
+  // line unbroken, "is-long" for a path or list that may wrap anywhere.
+  function valueClass(jsonText) {
+    return valueWords(jsonText).length <= SHORT_VALUE_CHARS ? "is-short" : "is-long";
+  }
+
+  function baseName(path) {
+    var parts = String(path).split("/");
+    return parts[parts.length - 1] || String(path);
+  }
+
+  // shortProcess(command): a process command line as "<program> <script>",
+  // for example "python train.py"; the full command goes in the row's title.
+  function shortProcess(command) {
+    var tokens = String(command == null ? "" : command).trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return "unknown";
+    var args = tokens.slice(1).filter(function (t) { return t.charAt(0) !== "-"; });
+    var script = args.filter(function (t) { return SCRIPT_RE.test(t); })[0] || args[0];
+    return baseName(tokens[0]) + (script ? " " + baseName(script) : "");
+  }
+
   // metaLine(savedAt, savedBy): the line under a settings pane's heading.
   function metaLine(savedAt, savedBy) {
     if (!savedAt) return LINE_NO_SAVE;
@@ -214,7 +264,7 @@
 
   function labelOf(fields, key) {
     var hit = (fields || []).filter(function (f) { return f.key === key; })[0];
-    return hit ? hit.label : key;
+    return hit ? (hit.history_label || hit.label) : key;
   }
 
   // driftLines(fields, drift): one sentence per key whose file value is not
@@ -240,8 +290,8 @@
 
   var helpers = {
     fieldsHtml: fieldsHtml, parseValue: parseValue, changedKeys: changedKeys, reasonReady: reasonReady,
-    cleanInitials: cleanInitials, historyCsv: historyCsv, valueWords: valueWords, metaLine: metaLine,
-    driftLines: driftLines, formatValue: formatValue
+    cleanInitials: cleanInitials, historyCsv: historyCsv, valueWords: valueWords, valueClass: valueClass,
+    shortProcess: shortProcess, metaLine: metaLine, driftLines: driftLines, formatValue: formatValue
   };
   if (typeof module === "object" && module && module.exports) module.exports = helpers;
   if (typeof window === "undefined") return;
@@ -287,20 +337,28 @@
 
   // settingsPane(cfg): the initialiser of one settings pane. cfg = {key,
   // route, store, title, okLabel, adjust(fields, payload), extra(ctx,
-  // payload), consequences(changed, before, after, payload) -> [lines]}.
+  // payload), consequences(changed, before, after, payload) -> [lines],
+  // danger(after) -> true when the confirmation button takes the danger style}.
   function settingsPane(cfg) {
     return function (ctx) {
       var el = {
         fields: ctx.q(cfg.key + "-fields"), meta: ctx.q(cfg.key + "-meta"), drift: ctx.q(cfg.key + "-drift"),
         reason: ctx.q(cfg.key + "-reason"), save: ctx.q(cfg.key + "-save"), result: ctx.q(cfg.key + "-result")
       };
-      var st = { payload: null, fields: [], before: {}, busy: false };
+      // stale: a save got no answer, so it may have happened; the button
+      // stays disabled until load() reads the stored values again.
+      var st = { payload: null, fields: [], before: {}, busy: false, stale: false };
 
       function refreshButton() {
+        Array.prototype.slice.call(el.fields.querySelectorAll("label.opt")).forEach(function (label) {
+          var box = label.querySelector('input[type="checkbox"]');
+          var word = label.querySelector("[data-vt-onoff]");
+          if (box && word) word.textContent = onOffWord(box.checked);
+        });
         if (!st.payload) { el.save.disabled = true; return; }
         var read = readFields(el.fields, st.fields);
         var changed = read.errors.length > 0 || changedKeys(st.fields, st.before, read.values).length > 0;
-        el.save.disabled = st.busy || !changed;
+        el.save.disabled = st.busy || st.stale || !changed;
       }
 
       function renderDrift() {
@@ -324,6 +382,7 @@
             return;
           }
           st.payload = res.data;
+          st.stale = false;
           st.fields = cfg.adjust ? cfg.adjust(res.data.fields || [], res.data) : (res.data.fields || []);
           st.before = Object.assign({}, res.data.values || {});
           el.fields.innerHTML = fieldsHtml(cfg.key, st.fields, st.before);
@@ -349,11 +408,23 @@
           .then(function (res) {
             st.busy = false;
             ctx.busy(el.save, false);
+            if (!res.ok && res.status === 0) { showNoAnswer(res); return; }
             if (!res.ok) { ctx.fail(el.result, res); refreshButton(); return; }
             ctx.setResult(el.result, esc(resultLine(res.data)));
             el.reason.value = "";
             return load();
           });
+      }
+
+      // showNoAnswer(res): the request timed out or never reached the
+      // desktop; the save may still have happened, so the pane refuses
+      // another until its values are read again.
+      function showNoAnswer(res) {
+        st.stale = true;
+        el.save.disabled = true;
+        ctx.fail(el.result, res);
+        el.result.insertAdjacentHTML("beforeend", ' <button type="button" class="btn btn-mini" data-vt-reload title="' +
+          esc(TIP_RELOAD) + '">Reload the pane</button>');
       }
 
       function confirmLines(changed, after) {
@@ -385,8 +456,9 @@
         if (!confirmed.length) { post(values, who, reason, false); return; }
         st.busy = true;
         el.save.disabled = true;
+        var danger = typeof cfg.danger === "function" && cfg.danger(read.values) === true;
         ctx.confirmDialog({ title: cfg.title, lines: confirmLines(changed, read.values).concat(["Reason: " + reason + "."]),
-                            okLabel: cfg.okLabel, primary: true })
+                            okLabel: cfg.okLabel, primary: !danger })
           .then(function (ok) {
             st.busy = false;
             if (!ok) { refreshButton(); return; }
@@ -414,6 +486,11 @@
       el.fields.addEventListener("input", refreshButton);
       el.fields.addEventListener("change", refreshButton);
       el.save.addEventListener("click", save);
+      el.result.addEventListener("click", function (e) {
+        if (!e.target.closest("[data-vt-reload]")) return;
+        ctx.setResult(el.result, "");
+        load();
+      });
       el.drift.addEventListener("click", function (e) {
         var button = e.target.closest("[data-vt-drift-record]");
         if (button) recordDrift(button);
@@ -438,6 +515,7 @@
       var field = (payload.fields || [])[0];
       if (glyph && field && field.tip) glyph.setAttribute("title", field.tip);
     },
+    danger: function (after) { return after.archive_shelf_copy === false; },
     consequences: function (changed, before, after, payload) {
       if (changed.indexOf("archive_shelf_copy") === -1) return [];
       if (after.archive_shelf_copy) return [LINE_ARCHIVE];
@@ -507,7 +585,8 @@
       });
       Object.keys(data.unclaimed || {}).forEach(function (pid) {
         var u = data.unclaimed[pid] || {};
-        rows.push('<li class="row"><span class="row-name">' + esc(u.process || "unknown") + " " + ctx.idChip("pid " + pid) + "</span>" +
+        rows.push('<li class="row"><span class="row-name vt-process" title="' + esc(u.process || "") + '">' + esc(shortProcess(u.process)) + " " +
+          ctx.idChip("pid " + pid) + "</span>" +
           '<span class="row-state">' + stateHtml("role-attention", "unclaimed") + "</span>" +
           '<span class="row-meta"><span class="count">cards ' + esc((u.cards || []).join(", ")) + "</span> <span class=\"count\">" + esc(u.used_mb) + " MB</span></span></li>");
       });
@@ -592,9 +671,9 @@
         if (!res.ok) { body.innerHTML = ""; if (!ctx.isRelocked()) ctx.fail(resultEl, res); return; }
         var mods = modulesList(res.data);
         body.innerHTML = mods.map(function (m) {
-          var facts = [m.category, m.pipeline_stage, m.status].filter(Boolean).map(function (f) {
-            return '<span class="count">' + esc(f) + "</span>";
-          }).join(" ");
+          var facts = [["category", m.category], ["stage", m.pipeline_stage], ["status", m.status]].filter(function (f) {
+            return !!f[1];
+          }).map(function (f) { return '<span class="count">' + esc(f[0] + " " + f[1]) + "</span>"; }).join(" ");
           return '<li class="row"><span class="row-name">' + esc(m.display_name || m.name) + " " + ctx.idChip(m.name) + "</span>" +
             (facts ? '<span class="row-meta">' + facts + "</span>" : "") + "</li>";
         }).join("") || '<li class="row"><span class="row-meta">No module found.</span></li>';
@@ -648,11 +727,13 @@
     var clearEl = ctx.q("history-clear");
     var bodyEl = ctx.q("history-body");
     var resultEl = ctx.q("history-result");
+    var csvEl = ctx.q("history-csv");
     var rows = [];
+    var keyTimer = null;
     var saved = readFilters();
     storeEl.value = STORE_LABELS[saved.store] ? saved.store : "";
     keyEl.value = typeof saved.key === "string" ? saved.key : "";
-    sinceEl.value = typeof saved.since === "string" ? saved.since : "";
+    sinceEl.value = typeof saved.since === "string" && DAY_RE.test(saved.since) ? saved.since : "";
 
     function filters() { return { store: storeEl.value, key: keyEl.value.trim(), since: sinceEl.value }; }
 
@@ -679,9 +760,11 @@
           '<span class="vt-when-time">' + esc(split > 0 ? when.slice(split + 1) : "") + '</span><span class="count vt-by">by ' + esc(r.by) + "</span></td>" +
           '<td class="vt-setting-cell">' +
           (r.label ? '<span class="vt-setting-label">' + esc(r.label) + "</span> " : "") + '<span class="id code">' + esc(r.key) + "</span>" +
-          '<span class="count vt-store">' + esc(STORE_LABELS[r.store] || r.store) + '</span></td><td class="vt-mono vt-value">' +
-          esc(valueWords(r.old)) + '</td><td class="vt-mono vt-value">' + esc(valueWords(r["new"])) + "</td><td>" + esc(r.reason) + "</td></tr>";
+          '<span class="count vt-store">' + esc(STORE_LABELS[r.store] || r.store) + "</span></td>" +
+          '<td class="vt-mono vt-value ' + valueClass(r.old) + '">' + esc(valueWords(r.old)) + "</td>" +
+          '<td class="vt-mono vt-value ' + valueClass(r["new"]) + '">' + esc(valueWords(r["new"])) + "</td><td>" + esc(r.reason) + "</td></tr>";
       }).join("");
+      csvEl.disabled = rows.length === 0;
       var f = filters();
       ctx.q("history-meta").textContent = metaWords(rows.length, data.total || 0, !!(f.store || f.key || f.since));
       var problems = [];
@@ -694,11 +777,15 @@
 
     function load() {
       var f = filters();
+      if (f.since && !DAY_RE.test(f.since)) { ctx.setResult(resultEl, esc(LINE_BAD_DAY), "error"); sinceEl.focus(); return Promise.resolve(); }
+      ctx.setResult(resultEl, "");
       writeFilters(f);
       clearEl.hidden = !(f.store || f.key || f.since);
       return ctx.desktopApi(query(f)).then(function (res) {
         if (!res.ok) {
           bodyEl.innerHTML = "";
+          rows = [];
+          csvEl.disabled = true;
           if (res.status === HTTP_NOT_FOUND) ctx.setResult(resultEl, esc(LINE_NOT_SERVED), "error");
           else if (!ctx.isRelocked()) ctx.fail(resultEl, res);
           return;
@@ -708,9 +795,14 @@
     }
 
     [storeEl, keyEl, sinceEl].forEach(function (input) { input.addEventListener("change", load); });
+    keyEl.addEventListener("input", function () {
+      if (keyTimer !== null) clearTimeout(keyTimer);
+      keyTimer = setTimeout(function () { keyTimer = null; load(); }, KEY_FILTER_DEBOUNCE_MS);
+    });
+    ctx.onStop(function () { if (keyTimer !== null) { clearTimeout(keyTimer); keyTimer = null; } });
     clearEl.addEventListener("click", function () { storeEl.value = ""; keyEl.value = ""; sinceEl.value = ""; load(); });
     ctx.q("history-refresh").addEventListener("click", load);
-    ctx.q("history-csv").addEventListener("click", function () {
+    csvEl.addEventListener("click", function () {
       var text = historyCsv(rows);
       var done = function () { ctx.setResult(resultEl, esc("Copied " + plural(rows.length, "line") + " as CSV.")); };
       var failed = function () { ctx.setResult(resultEl, esc("The browser refused the clipboard; nothing was copied."), "error"); };

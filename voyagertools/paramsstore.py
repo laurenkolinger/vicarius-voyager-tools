@@ -927,6 +927,44 @@ class ParamsStore:
                     "detail": f"committed; push failed: {(push.stderr or push.stdout).strip()}"}
         return {"committed": True, "pushed": True, "commit": sha, "paths": targets, "detail": "committed and pushed"}
 
+    def discard_pending(self, only: list[str]) -> list[str]:
+        """Undo the named pending writes: restore a tracked file from git, remove an untracked one.
+
+        Only paths that are both in `only` and pending are touched, so an
+        earlier save whose push failed stays pending and on disk. Used when
+        the settings history line of a save cannot be written, so no
+        parameter change exists without its history line.
+
+        Parameters:
+            only: checkout-relative paths (no leading "/", no "..").
+        Returns:
+            The paths discarded, in pending order.
+        Raises:
+            TypeError: when only is None or a single string.
+            ValueError: for an absolute path or one with a ".." part.
+            GitError: when git cannot say whether a path is tracked or cannot
+                restore it; that path and the ones after it stay pending.
+        """
+        if only is None:
+            raise TypeError("only must list the checkout-relative paths to discard, not None")
+        wanted = set(self._commit_paths(only))
+        discarded = []
+        for rel_path in [p for p in self._pending if p in wanted]:
+            tracked = self._git(["ls-files", "--error-unmatch", "--", rel_path]).returncode == 0
+            if tracked:
+                self._git_or_raise(["checkout", "--", rel_path])
+            else:
+                target = self.root / rel_path
+                try:
+                    target.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    raise OSError(f"cannot remove the unsaved parameter file {target}: {exc}") from exc
+            self._pending.remove(rel_path)
+            discarded.append(rel_path)
+        return discarded
+
     def _commit_paths(self, paths: Optional[Iterable[str]]) -> list[str]:
         """The paths to stage: the pending list, or the caller's list validated."""
         if paths is None:

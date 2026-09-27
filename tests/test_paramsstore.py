@@ -1110,5 +1110,81 @@ class RealCheckoutTests(unittest.TestCase):
         self.assertFalse((REAL_CHECKOUT / "voyager1" / "versions" / "v1.1.0.yaml").exists())
 
 
+def _git_setup(root: Path, *args: str) -> None:
+    """Run one setup git command in a scratch checkout, with a throwaway identity."""
+    import subprocess
+    subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", *args],
+                   cwd=str(root), check=True, capture_output=True, text=True)
+
+
+class DiscardPendingTests(unittest.TestCase):
+    """discard_pending(only=...) against a real git checkout in a temporary folder."""
+
+    def setUp(self):
+        if not shutil.which("git"):
+            self.skipTest("git is not installed on this box")
+        self.tmp = Path(tempfile.mkdtemp(prefix="voyagerparams_discard_"))
+        seed_checkout(self.tmp)
+        _git_setup(self.tmp, "init", "-q")
+        _git_setup(self.tmp, "add", "-A")
+        _git_setup(self.tmp, "commit", "-q", "-m", "seed")
+        self.store = ps.ParamsStore(self.tmp, now=lambda: FIXED_NOW)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+        self.assertFalse(self.tmp.exists())
+
+    def changed(self) -> dict:
+        values = self.store.load("voyager1", "default").values
+        values["processing"]["use_gpu"] = False
+        return values
+
+    def test_restores_a_tracked_file_and_removes_a_new_one(self):
+        self.store.save_default("voyager1", self.changed(), "d", "LO")
+        self.assertEqual((self.tmp / "voyager1" / "DEFAULT").read_text().strip(), "v1.1.0")
+        gone = self.store.discard_pending(only=list(self.store.pending_paths))
+        self.assertEqual(gone, ["voyager1/versions/v1.1.0.yaml", "voyager1/DEFAULT"])
+        self.assertEqual((self.tmp / "voyager1" / "DEFAULT").read_text().strip(), "v1.0.0")
+        self.assertFalse((self.tmp / "voyager1" / "versions" / "v1.1.0.yaml").exists())
+        self.assertEqual(self.store.pending_paths, [])
+
+    def test_an_older_pending_save_stays_untouched(self):
+        self.store.save_branch("voyager1", "default", "cpu", "d", "w", self.changed(), "LO")
+        before = self.store.pending_paths
+        self.store.save_default("voyager1", self.changed(), "d", "LO")
+        new = [p for p in self.store.pending_paths if p not in before]
+        self.store.discard_pending(only=new)
+        self.assertEqual(self.store.pending_paths, ["voyager1/branches/cpu/v1.0.0.yaml"])
+        self.assertTrue((self.tmp / "voyager1" / "branches" / "cpu" / "v1.0.0.yaml").exists())
+
+    def test_a_path_that_is_not_pending_is_never_touched(self):
+        (self.tmp / "voyager1" / "DEFAULT").write_text("v9.9.9\n", encoding="utf-8")
+        self.assertEqual(self.store.discard_pending(only=["voyager1/DEFAULT"]), [])
+        self.assertEqual((self.tmp / "voyager1" / "DEFAULT").read_text().strip(), "v9.9.9")
+
+    def test_bad_arguments_are_refused(self):
+        with self.assertRaises(TypeError):
+            self.store.discard_pending(only="voyager1/DEFAULT")
+        with self.assertRaises(TypeError):
+            self.store.discard_pending(only=None)
+        with self.assertRaises(ValueError):
+            self.store.discard_pending(only=["../outside"])
+        with self.assertRaises(ValueError):
+            self.store.discard_pending(only=["/etc/passwd"])
+
+    def test_a_git_failure_keeps_the_path_pending(self):
+        self.store.save_default("voyager1", self.changed(), "d", "LO")
+
+        def broken(args, cwd):
+            if args[:1] == ["checkout"]:
+                return ps.GitResult(1, "", "index locked")
+            return ps.run_git_subprocess(args, cwd)
+        self.store.run_git = broken
+        with self.assertRaises(ps.GitError) as caught:
+            self.store.discard_pending(only=list(self.store.pending_paths))
+        self.assertIn("index locked", str(caught.exception))
+        self.assertIn("voyager1/DEFAULT", self.store.pending_paths)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,7 +1,7 @@
 {#
   File:    templates/voyager_tools/panes_settings.html
   Purpose: The settings, desktop and history panes of the Atlas control panel
-           (program C spec sections 3.3, 3.4, 4.8, 4.9 and 5.3, milestone C3),
+           (program C spec sections 3.3, 3.4, 4.8, 4.9 and 5.3),
            included by panel.html inside <div class="vt-panes">. Var-free:
            every list, field and value is filled by static/vt_settings.js
            from the desktop's /api/settings routes (and, for the read-only
@@ -9,7 +9,8 @@
            /api/desktop/prefs). Each settings pane is a heading with its "i"
            glyph, a meta line (the last save), a drift line when the store
            file changed outside the write path, the fields as definition-list
-           rows, one Reason row, one primary button and one result line.
+           rows (grouped under sub-headings where the fields carry a group),
+           one Reason row, one primary button and one result line.
 #}
 
       {# 9. Manual edit settings (store manual_edit) #}
@@ -20,7 +21,7 @@
         </div>
         <p class="count vt-line" data-vt="settings-meta"></p>
         <div class="vt-drift" data-vt="settings-drift" hidden></div>
-        <dl class="choices" data-vt="settings-fields"></dl>
+        <div class="vt-fields" data-vt="settings-fields"></div>
         <dl class="choices vt-reason-row">
           <div>
             <dt><label for="vt-settings-reason">Reason</label><button type="button" class="tip" aria-label="About the reason" title="Type why the settings change. VICARIUS writes the reason beside each changed setting in the settings history."><span>?</span></button></dt>
@@ -41,7 +42,7 @@
         </div>
         <p class="count vt-line" data-vt="shelf-meta"></p>
         <div class="vt-drift" data-vt="shelf-drift" hidden></div>
-        <dl class="choices" data-vt="shelf-fields"></dl>
+        <div class="vt-fields" data-vt="shelf-fields"></div>
         <dl class="choices vt-reason-row">
           <div>
             <dt><label for="vt-shelf-reason">Reason</label><button type="button" class="tip" aria-label="About the reason" title="Type why the Shelf copy setting changes. VICARIUS refuses the change without a reason and writes it beside the change in the settings history."><span>?</span></button></dt>
@@ -62,8 +63,11 @@
         </div>
         <p class="count vt-line" data-vt="runs-meta"></p>
         <div class="vt-drift" data-vt="runs-drift" hidden></div>
-        <dl class="choices" data-vt="runs-fields"></dl>
-        <p class="vt-line vt-state" data-vt="runs-v2" hidden><span class="chip role-planned" aria-hidden="true"></span>Voyager 2 settings appear once the Voyager 2 window ships</p>
+        <div class="vt-fields" data-vt="runs-fields"></div>
+        <div class="vt-planned-group" data-vt="runs-v2" hidden>
+          <h3 class="vt-field-group">Voyager 2</h3>
+          <p class="vt-line vt-state"><span class="chip role-planned" aria-hidden="true"></span>Voyager 2 settings appear with the Voyager 2 window.</p>
+        </div>
         <dl class="choices vt-reason-row">
           <div>
             <dt><label for="vt-runs-reason">Reason</label><button type="button" class="tip" aria-label="About the reason" title="Type why the run settings change. VICARIUS refuses a change of a run switch without a reason and writes it beside each change in the settings history."><span>?</span></button></dt>
@@ -83,6 +87,7 @@
           <button type="button" class="tip" aria-label="About module locks" title="A locked module shows everyone, admin included, the page &quot;Under development. Please come back later. Email Lauren for questions.&quot; The padlock in each module window's title bar locks and unlocks it, and VICARIUS keeps the state in /mnt/rip/vicarius_drive/vicarius/_METADATA/module_locks.json."><span>i</span></button>
         </div>
         <p class="count vt-line" data-vt="locks-meta"></p>
+        <p class="vt-line">Lock or unlock a module with the padlock in its window's title bar.</p>
         <ul class="rows vt-striped" data-vt="locks-body"></ul>
         <div class="actions">
           <button type="button" class="btn" data-vt="locks-refresh">Refresh</button>
@@ -128,7 +133,7 @@
         <p class="count vt-line" data-vt="floors-meta"></p>
         <p class="vt-line" data-vt="floors-driver"></p>
         <div class="vt-drift" data-vt="floors-drift" hidden></div>
-        <dl class="choices" data-vt="floors-fields"></dl>
+        <div class="vt-fields" data-vt="floors-fields"></div>
         <dl class="choices vt-reason-row">
           <div>
             <dt><label for="vt-floors-reason">Reason</label><button type="button" class="tip" aria-label="About the reason" title="Type why the floors change. VICARIUS refuses a change of a floor without a reason and writes it beside each change in the settings history."><span>?</span></button></dt>
@@ -187,8 +192,8 @@
             <dd><input type="text" id="vt-history-key" class="vt-field w-name" data-vt="history-key" maxlength="200" autocomplete="off" spellcheck="false"></dd>
           </div>
           <div>
-            <dt><label for="vt-history-since">Since</label><button type="button" class="tip" aria-label="About the since filter" title="Pick the first day to list; VICARIUS lists lines saved on that day or later."><span>?</span></button></dt>
-            <dd><input type="date" id="vt-history-since" class="vt-field" data-vt="history-since">
+            <dt><label for="vt-history-since">Since</label><button type="button" class="tip" aria-label="About the since filter" title="Type the first day to list as YYYY-MM-DD. VICARIUS lists lines saved on that day or later."><span>?</span></button></dt>
+            <dd><input type="text" id="vt-history-since" class="vt-field w-day" data-vt="history-since" placeholder="YYYY-MM-DD" maxlength="10" inputmode="numeric" autocomplete="off" spellcheck="false">
                 <button type="button" class="btn btn-mini" data-vt="history-clear" hidden>Clear filters</button></dd>
           </div>
         </dl>
@@ -201,7 +206,7 @@
           </table>
         </div>
         <div class="actions">
-          <button type="button" class="btn btn-mini" data-vt="history-csv">Copy as CSV</button>
+          <button type="button" class="btn" data-vt="history-csv" disabled title="Copy the lines listed, every cell quoted, for a spreadsheet. A cell that would start a formula gets a leading apostrophe.">Copy as CSV</button>
           <button type="button" class="btn" data-vt="history-refresh">Refresh</button>
         </div>
         <p class="result" data-vt="history-result" role="status"></p>

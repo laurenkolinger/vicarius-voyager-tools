@@ -74,7 +74,10 @@ class SettingsHelpers(unittest.TestCase):
                         "{scale_error_max_mm: 4.94, markers_per_chunk: 4, edit_bench_default: '/mnt/rip/editbench',"
                         " open_close_logging: true, archive_shelf_copy: true});")
         self.assertEqual(html.count("<div class=\"vt-setting\""), len(FIELDS))
-        self.assertEqual(html.count('class="tip"'), len(FIELDS))
+        options = sum(len(f.get("options", [])) for f in FIELDS)
+        self.assertEqual(html.count('class="tip"'), len(FIELDS) + options, "one glyph per field and per option")
+        self.assertEqual(html.count('<dl class="choices">'), 1)
+        self.assertNotIn("vt-field-group", html)
         self.assertIn('value="4.94"', html)
         self.assertIn('value="4"', html)
         self.assertIn('value="/mnt/rip/editbench"', html)
@@ -83,6 +86,36 @@ class SettingsHelpers(unittest.TestCase):
         self.assertRegex(html, r'type="radio"[^>]*value="false"[^>]*disabled')
         self.assertIn("Overwrite cannot be chosen yet.", html)
         self.assertIn("mm</span>", html)
+
+    def test_fields_html_groups_rows_under_their_sub_heading(self):
+        grouped = [dict(FIELDS[3], key="a", label="Run Voyager 1 batches", group="Voyager 1"),
+                   dict(FIELDS[3], key="b", label="Delete from the Workbench", group="Voyager 1"),
+                   dict(FIELDS[3], key="c", label="Run Voyager 2 batches", group="Voyager 2")]
+        html = run_node("return h.fieldsHtml('runs', " + json.dumps(grouped) + ", {a: true, b: false, c: true});")
+        self.assertEqual(html.count('<h3 class="vt-field-group">'), 2)
+        self.assertEqual(html.count('<dl class="choices">'), 2)
+        self.assertLess(html.index("Voyager 1</h3>"), html.index('data-vt-key="b"'))
+        self.assertLess(html.index('data-vt-key="b"'), html.index("Voyager 2</h3>"))
+
+    def test_a_checkbox_reads_on_or_off_with_its_state(self):
+        html = run_node("return h.fieldsHtml('x', " + json.dumps([FIELDS[3]]) + ", {open_close_logging: false});")
+        self.assertIn(">Off</span>", html)
+        self.assertNotIn(">On</span>", html)
+
+    def test_a_disabled_option_says_why_on_a_focusable_glyph(self):
+        html = run_node("return h.fieldsHtml('x', " + json.dumps([FIELDS[4]]) + ", {archive_shelf_copy: true});")
+        self.assertRegex(html, r'<button type="button" class="tip"[^>]*title="Overwrite cannot be chosen yet\."')
+        self.assertNotRegex(html, r'<label[^>]*title=')
+
+    def test_short_process_names_the_executable_and_the_script(self):
+        out = run_node("return [h.shortProcess('/mnt/x/env/bin/python -u /home/b/.config/Ultralytics/train.py --epochs 5'),"
+                       " h.shortProcess('/usr/bin/ollama serve'), h.shortProcess('metashape'), h.shortProcess(''),"
+                       " h.shortProcess(null)];")
+        self.assertEqual(out, ["python train.py", "ollama serve", "metashape", "unknown", "unknown"])
+
+    def test_value_class_keeps_short_values_whole(self):
+        out = run_node("return [h.valueClass('false'), h.valueClass('4.94'), h.valueClass('\"/mnt/rip/driver_staging/editbench\"')];")
+        self.assertEqual(out, ["is-short", "is-short", "is-long"])
 
     def test_fields_html_escapes_hostile_labels_tips_and_values(self):
         hostile = [{"key": "k\"><img src=x onerror=alert(1)>", "label": "<script>alert(1)</script>",
@@ -215,6 +248,12 @@ class SourceGuards(unittest.TestCase):
         for key in ("settings", "shelf", "runs", "floors", "gpu", "locks", "modules", "appearance", "history"):
             with self.subTest(key=key):
                 self.assertRegex(self.settings, r'register\("' + key + '"')
+
+    def test_the_initials_are_never_seeded_from_the_desktop_fallback(self):
+        # VICBOOT.getInitials answers a fixed pair of letters when nobody typed
+        # any; a settings history line signed that way would name the wrong person.
+        self.assertNotIn("getInitials", self.panel)
+        self.assertNotIn("getInitials", self.settings)
 
     def test_initials_rule_in_both_scripts(self):
         self.assertIn("/^[A-Z]{2,4}$/", self.panel)
