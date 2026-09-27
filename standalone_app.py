@@ -14,7 +14,8 @@ Outputs: an HTTP server; the session cookie is voyager_tools_session, never
          vicarius_session cookie on the same host. Admin mode here ends
          ADMIN_IDLE_S seconds after the last admin action, the same rule as
          the desktop (decision 8 of the manual edit chain); nothing is
-         imported from the desktop.
+         imported from the desktop. A response that renewed admin mode
+         carries RENEW_HEADER with the new seconds left.
 
 Usage:
     VOYAGER_TOOLS_ADMIN_PIN=... python3 standalone_app.py --port 5098
@@ -50,6 +51,10 @@ FLAG_KEY = "admin_unlocked"
 SEEN_KEY = "admin_seen"
 SESSION_FLAGS = (FLAG_KEY, SEEN_KEY)
 HTTP_ERROR_FLOOR = 400
+# The header a renewing response carries with the new seconds left; the
+# desktop's admin_session.RENEW_HEADER, repeated because nothing is imported
+# from the desktop.
+RENEW_HEADER = "X-Vicarius-Admin-Expires-In"
 
 # The clock the idle limit reads; tests replace it.
 now_fn = time.time
@@ -104,10 +109,11 @@ def create_app(admin_pin: str | None = None) -> Flask:
 
     @app.after_request
     def _admin_renew(response):
-        """Restart the idle limit after an admin-gated POST that succeeded (never a GET or a poll)."""
+        """Restart the idle limit after an admin-gated POST that succeeded (never a GET or a poll), and tell the page."""
         if (request.method == "POST" and response.status_code < HTTP_ERROR_FLOOR
                 and g.get("admin_gated") and admin_seconds_left(session) is not None):
             session[SEEN_KEY] = now_fn()
+            response.headers[RENEW_HEADER] = str(ADMIN_IDLE_S)
         return response
 
     @app.route("/")
@@ -146,6 +152,7 @@ def create_app(admin_pin: str | None = None) -> Flask:
         if admin_seconds_left(session) is None:
             return jsonify(dict(views.ADMIN_ERROR)), views.HTTP_UNAUTHORISED
         session[SEEN_KEY] = now_fn()
+        g.admin_gated = True  # the renewal hook adds RENEW_HEADER
         return jsonify(admin_status(session))
 
     return app

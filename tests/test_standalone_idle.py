@@ -106,6 +106,26 @@ class StandaloneIdle(unittest.TestCase):
             self.assertNotIn("admin_unlocked", sess)
             self.assertNotIn("admin_seen", sess)
 
+    def test_a_renewing_post_carries_the_new_expiry(self):
+        self.t = T0 + 590
+        r = self.c.post("/probe")
+        self.assertEqual(r.headers.get(standalone_app.RENEW_HEADER), "600")
+        self.assertEqual(self.c.post("/api/admin/renew").headers.get(standalone_app.RENEW_HEADER), "600")
+
+    def test_no_expiry_header_on_reads_or_refusals(self):
+        self.t = T0 + 100
+        self.assertNotIn(standalone_app.RENEW_HEADER, self.c.get("/api/admin/status").headers)
+        self.assertNotIn(standalone_app.RENEW_HEADER, self.c.post("/probe-fail").headers)
+        self.t = T0 + 701
+        self.assertNotIn(standalone_app.RENEW_HEADER, self.c.post("/probe").headers)
+
+    def test_the_header_name_matches_the_desktop(self):
+        self.assertEqual(standalone_app.RENEW_HEADER, "X-Vicarius-Admin-Expires-In")
+
+    def test_page_makes_no_request_for_the_desktop_script(self):
+        html = self.c.get("/voyager-tools/").get_data(as_text=True)
+        self.assertNotIn("admin_session.js", html)
+
 
 if __name__ == "__main__":
     unittest.main()
