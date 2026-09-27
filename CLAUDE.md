@@ -1,10 +1,10 @@
 # voyager_tools: rules for agents in this clone
 
-Last updated: 2026-09-04 (LO)
+Last updated: 2026-09-27 (LO)
 
 This file is a pointer. The rules for every agent working anywhere on the VICARIUS drive live in one place, `/mnt/rip/vicarius_drive/CLAUDE.md`. Read it with the Read tool at the start of any session in this clone (a Bash `cat` does not load it into context). Nothing here overrides it; this file says how those rules apply to the `voyager_tools` module and lists what a module has to satisfy before it is done.
 
-This clone is the voyager_tools module (display name Voyager tools): the admin-only tools page of the Voyager program and the home of `voyagertools/paramsstore.py`, the library that reads and writes the voyagerparams checkout at `/mnt/rip/vicarius_drive/vicarius/modules/voyagerparams/github_repo/`. The remote name `laurenkolinger/voyager_tools` is reserved; as of 2026-09-04 the clone has no git history yet and the remote is created when the tools page ships (plan task B6').
+This clone is the voyager_tools module: the admin-only tools page of the Voyager program and the home of `voyagertools/paramsstore.py`, the library that reads and writes the voyagerparams checkout at `/mnt/rip/vicarius_drive/vicarius/modules/voyagerparams/github_repo/`. Its display name becomes Atlas control panel (decision 9 of `/mnt/rip/vicarius_drive/docs/superpowers/specs/2026-09-26-manual-edit-chain-decisions.md`); the slug `voyager_tools`, the address `/voyager-tools`, the event actor prefix `voyager_tools:` and the browser keys stay. The remote is `laurenkolinger/vicarius-voyager-tools`.
 
 ## Where the rules live
 
@@ -18,12 +18,12 @@ This clone is the voyager_tools module (display name Voyager tools): the admin-o
 
 ## Git and gh in this clone
 
-- This directory, `/mnt/rip/vicarius_drive/vicarius/modules/voyager_tools/github_repo/`, is its own git repository with the remote `laurenkolinger/voyager_tools`. The harness monorepo above it ignores every `github_repo/` except `vicarius_llm`, so nothing committed here reaches the harness, and module code is never committed to the harness.
+- This directory, `/mnt/rip/vicarius_drive/vicarius/modules/voyager_tools/github_repo/`, is its own git repository with the remote `laurenkolinger/vicarius-voyager-tools`. The harness monorepo above it ignores every `github_repo/` except `vicarius_llm`, so nothing committed here reaches the harness, and module code is never committed to the harness.
 - Every git command is `git -C /mnt/rip/vicarius_drive/vicarius/modules/voyager_tools/github_repo ...`. The shell cwd drifts between calls on this box; a bare `git add -A && git commit` once swept 1.1M lines of unrelated harness work into a module commit.
 - Verify the branch before every commit: `git -C /mnt/rip/vicarius_drive/vicarius/modules/voyager_tools/github_repo branch --show-current`. The expected branch is `main`; when it is anything else, say so and confirm before committing.
 - Stage by explicit path. Never `git add -A` and never `git add .`.
 - Conventional-commit subject, a body that says why, and the closing line `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
-- Every `gh` call takes `-R laurenkolinger/voyager_tools`. The snap-confined gh on this box cannot infer the repo from the cwd.
+- Every `gh` call takes `-R laurenkolinger/vicarius-voyager-tools`. The snap-confined gh on this box cannot infer the repo from the cwd.
 - Never commit data files (images, videos, checkpoints, exports, copies of NAS content). `.gitignore` in this clone lists the common patterns; data lives on the NAS and VICARIUS logs provenance.
 - The pre-push hook at `.githooks/pre-push` is the logging-only shim copied from `/mnt/rip/vicarius_drive/.githooks/lib/modules-pre-push`, activated by `git -C <clone> config core.hooksPath .githooks`. It appends a row to the platform processing log on every push and never blocks. A push that produces no row means the hook install is wrong; reinstall per `/mnt/rip/vicarius_drive/vicarius/_DOCS/SOPs/GIT_SYNC_SOP.md`, section "Hooks: harness versus module repos" (line 33).
 
@@ -38,7 +38,7 @@ Each item restates a rule from the `Modules` section of `/mnt/rip/vicarius_drive
 - **A tooltip on every UI field.** Every form field, parameter, checkbox and setting in this module's UI carries one, as `title` on a keyboard-focusable `?` glyph beside the label (`i` beside a section heading). The sentence rules, in three lines:
   1. One or two complete sentences; the first names who does what. A control the user operates opens with an imperative; what the system does afterwards is a sentence with VICARIUS or the named tool as its subject.
   2. Never open with "You". No fragments, trailing negations, screen references ("above", "this tab"), or self-reference. A tooltip adds a default, a consequence, a count, or where a path points; one that only restates its label is dropped.
-  3. Terms of art are explained once, on the section heading glyph; every folder or file mention says where it is or what to do with it. After writing a page of tooltips, three independent agents with different lenses (a power user who resents noise, a newcomer, a UI writer) classify each as keep, trim, or drop, and the majority verdict is applied.
+  3. Terms of art are explained once, on the section heading glyph; every folder or file mention says where it is or what to do with it. After writing a page of tooltips, one independent reviewer agent classifies each as keep, trim or drop, and its verdicts are applied (one reviewer per ask, never a panel).
 - **Outputs bound to descriptors.** Every `outputs:` entry in `module.yaml` names a `dataset:` whose descriptor exists under `/mnt/rip/vicarius_drive/vicarius/_METADATA/dictionary/datasets/` (named `voyager_tools_<slug>.yaml`) with `eml: true`. The runner writes `<output>.eml.xml` beside each artifact on success (a soft failure while the format stabilises). Draft a stub descriptor before merging a module that lacks one. When the module's output shape changes, bump the descriptor's `schema_version` and stamp `last_updated` on its line 3 in the same change. Viewer and launcher modules legitimately declare `outputs: []`. Rules: `/mnt/rip/vicarius_drive/vicarius/_DOCS/reference/DATA_DICTIONARY.md`.
 - **display_name and tags come from Lauren.** Before writing `module.yaml` ask once, tersely, for `display_name` (short, under about 20 characters) and `tags` (from 3D, AI, AUV, TCRMP, or a new one). Never fall back to the folder name.
 - **Registration verified four ways.** (1) Live discovery: `cd /mnt/rip/vicarius_drive/vicarius_ui_os && .venv/bin/python -c "import module_registry as mr; print([m['name'] for m in mr.discover_modules()])"` lists `voyager_tools`. (2) `curl -s localhost:5090/api/modules | grep voyager_tools` finds it and `curl -s -o /dev/null -w '%{http_code}' localhost:5090/modules/voyager_tools` prints 200. (3) `VICARIUS_ROOT=/mnt/rip/vicarius_drive/vicarius python3 /mnt/rip/vicarius_drive/vicarius/modules/update_registry.py --check` passes. (4) `module.yaml` is complete with a tooltip on every UI field. Regenerate `/mnt/rip/vicarius_drive/vicarius/modules/MODULE_REGISTRY.md` only when no other agent is mid-edit on it.

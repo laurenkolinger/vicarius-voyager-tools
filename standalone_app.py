@@ -11,7 +11,10 @@ Inputs:  --port (default 5098), --host (default 127.0.0.1); the admin PIN
          every route stays locked at 401).
 Outputs: an HTTP server; the session cookie is voyager_tools_session, never
          Flask's default name, so it can never overwrite the desktop's
-         vicarius_session cookie on the same host.
+         vicarius_session cookie on the same host. Admin mode here ends
+         ADMIN_IDLE_S seconds after the last admin action, the same rule as
+         the desktop (decision 8 of the manual edit chain); nothing is
+         imported from the desktop.
 
 Usage:
     VOYAGER_TOOLS_ADMIN_PIN=... python3 standalone_app.py --port 5098
@@ -20,12 +23,14 @@ from __future__ import annotations
 
 import argparse
 import hmac
+import math
 import os
 import secrets
 import sys
+import time
 from pathlib import Path
 
-from flask import Flask, jsonify, redirect, request, session
+from flask import Flask, g, jsonify, redirect, request, session
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -40,6 +45,40 @@ SECRET_ENV = "VOYAGER_TOOLS_SECRET"
 FORBIDDEN_PORTS = frozenset({5050, 5055, 5065, 5070, 5075, 5077, 5080, 5081, 5083, 5085, 5090, 5092, 5093, 5096})
 MIN_PORT, MAX_PORT = 1024, 65535
 MAX_PIN_CHARS = 64
+ADMIN_IDLE_S = 600
+FLAG_KEY = "admin_unlocked"
+SEEN_KEY = "admin_seen"
+SESSION_FLAGS = (FLAG_KEY, SEEN_KEY)
+HTTP_ERROR_FLOOR = 400
+
+# The clock the idle limit reads; tests replace it.
+now_fn = time.time
+
+
+def admin_seconds_left(sess) -> int | None:
+    """Return the whole seconds left in admin mode for a session, or None when not admin.
+
+    Parameters:
+        sess: the session mapping.
+    Returns:
+        None unless the flag is true and admin_seen is a number no more than
+        ADMIN_IDLE_S seconds old (a clock stepped back counts as no time).
+    """
+    seen = sess.get(SEEN_KEY)
+    if sess.get(FLAG_KEY) is not True or isinstance(seen, bool) or not isinstance(seen, (int, float)):
+        return None
+    if not math.isfinite(seen):
+        return None
+    idle = max(0.0, now_fn() - seen)
+    if idle > ADMIN_IDLE_S:
+        return None
+    return max(0, math.ceil(ADMIN_IDLE_S - idle))
+
+
+def admin_status(sess) -> dict:
+    """The admin status payload, the desktop's shape: unlocked, expires_in_s, idle_limit_s (expires_at is not kept here)."""
+    left = admin_seconds_left(sess)
+    return {"unlocked": left is not None, "expires_at": None, "expires_in_s": left, "idle_limit_s": ADMIN_IDLE_S}
 
 
 def create_app(admin_pin: str | None = None) -> Flask:
@@ -56,15 +95,30 @@ def create_app(admin_pin: str | None = None) -> Flask:
     app.json.sort_keys = False
     app.register_blueprint(views.voyager_tools_bp)
 
+    @app.before_request
+    def _admin_idle_expiry():
+        """Clear the admin flags of a session past the idle limit, before any view reads them."""
+        if FLAG_KEY in session and admin_seconds_left(session) is None:
+            for key in SESSION_FLAGS:
+                session.pop(key, None)
+
+    @app.after_request
+    def _admin_renew(response):
+        """Restart the idle limit after an admin-gated POST that succeeded (never a GET or a poll)."""
+        if (request.method == "POST" and response.status_code < HTTP_ERROR_FLOOR
+                and g.get("admin_gated") and admin_seconds_left(session) is not None):
+            session[SEEN_KEY] = now_fn()
+        return response
+
     @app.route("/")
     def root():
         """The page lives under the blueprint prefix."""
         return redirect(views.URL_PREFIX, code=302)
 
     @app.route("/api/admin/status")
-    def admin_status():
-        """Whether this session is in admin mode."""
-        return jsonify({"unlocked": bool(session.get("admin_unlocked"))})
+    def admin_status_route():
+        """Whether this session is in admin mode, and for how long; never renews."""
+        return jsonify(admin_status(session))
 
     @app.route("/api/admin/unlock", methods=["POST"])
     def admin_unlock():
@@ -75,14 +129,24 @@ def create_app(admin_pin: str | None = None) -> Flask:
             return jsonify({"ok": False, "error": f"admin unlock is not configured; set {ADMIN_PIN_ENV}"}), 401
         if not hmac.compare_digest(given, pin):
             return jsonify({"ok": False, "error": "Wrong PIN"}), 401
-        session["admin_unlocked"] = True
-        return jsonify({"ok": True, "unlocked": True})
+        session[FLAG_KEY] = True
+        session[SEEN_KEY] = now_fn()
+        return jsonify({"ok": True, **admin_status(session)})
 
     @app.route("/api/admin/lock", methods=["POST"])
     def admin_lock():
         """Leave admin mode."""
-        session.pop("admin_unlocked", None)
-        return jsonify({"ok": True, "unlocked": False})
+        for key in SESSION_FLAGS:
+            session.pop(key, None)
+        return jsonify({"ok": True, **admin_status(session)})
+
+    @app.route("/api/admin/renew", methods=["POST"])
+    def admin_renew():
+        """Stay in admin mode: restart the idle limit, 401 outside admin mode."""
+        if admin_seconds_left(session) is None:
+            return jsonify(dict(views.ADMIN_ERROR)), views.HTTP_UNAUTHORISED
+        session[SEEN_KEY] = now_fn()
+        return jsonify(admin_status(session))
 
     return app
 
