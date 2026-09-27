@@ -57,6 +57,10 @@ class Pure(unittest.TestCase):
         self.assertEqual(cme.PHASE_CANCELLED, jobstore.CANCELLED)
         self.assertEqual(cme.FAILED_PREFIX, jobstore.FAILED_PREFIX)
 
+    def test_initials_rule_is_the_registry_rule(self):
+        import registry
+        self.assertEqual(cme.INITIALS_PATTERN.pattern, registry.MANUAL_EDIT_INITIALS_PATTERN.pattern)
+
     def test_certified_project_states_match_the_manual_edit_clone(self):
         # Program B adds these transect states in B0c to B3; each one the job
         # store already defines must carry the word this module mirrors.
@@ -81,7 +85,9 @@ class Pure(unittest.TestCase):
 
     def test_actor(self):
         self.assertEqual(cme.actor("lo"), "voyager_tools:LO")
-        for bad in ("", "L O", "LO;x", "a" * 9):
+        self.assertEqual(cme.actor(" abcd "), "voyager_tools:ABCD")
+        # Two to four letters, the registry's MANUAL_EDIT_INITIALS_PATTERN (program C milestone C3).
+        for bad in ("", "L O", "LO;x", "a" * 9, "L", "L0", "ABCDE", "12"):
             with self.assertRaises(ValueError):
                 cme.actor(bad)
         with self.assertRaises(TypeError):

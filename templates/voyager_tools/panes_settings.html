@@ -1,0 +1,213 @@
+{#
+  File:    templates/voyager_tools/panes_settings.html
+  Purpose: The settings, desktop and history panes of the Atlas control panel
+           (program C spec sections 3.3, 3.4, 4.8, 4.9 and 5.3),
+           included by panel.html inside <div class="vt-panes">. Var-free:
+           every list, field and value is filled by static/vt_settings.js
+           from the desktop's /api/settings routes (and, for the read-only
+           panes, /api/gpu/claims, /api/modules, /api/modules/locks and
+           /api/desktop/prefs). Each settings pane is a heading with its "i"
+           glyph, a meta line (the last save), a drift line when the store
+           file changed outside the write path, the fields as definition-list
+           rows (grouped under sub-headings where the fields carry a group),
+           one Reason row, one primary button and one result line.
+#}
+
+      {# 9. Manual edit settings (store manual_edit) #}
+      <section class="vt-pane" id="vt-settings" role="tabpanel" data-vt-pane="settings" aria-labelledby="vt-settings-h" hidden>
+        <div class="pane-head">
+          <h2 id="vt-settings-h">Manual edit settings</h2>
+          <button type="button" class="tip" aria-label="About the manual edit settings" title="These limits and counts judge every manual edit. VICARIUS stores the values in force, and the time they were saved, with every check and rescale it records."><span>i</span></button>
+        </div>
+        <p class="count vt-line" data-vt="settings-meta"></p>
+        <div class="vt-drift" data-vt="settings-drift" hidden></div>
+        <div class="vt-fields" data-vt="settings-fields"></div>
+        <dl class="choices vt-reason-row">
+          <div>
+            <dt><label for="vt-settings-reason">Reason</label><button type="button" class="tip" aria-label="About the reason" title="Type why the settings change. VICARIUS writes the reason beside each changed setting in the settings history."><span>?</span></button></dt>
+            <dd><input type="text" id="vt-settings-reason" class="vt-field vt-reason" data-vt="settings-reason" maxlength="500" autocomplete="off"></dd>
+          </div>
+        </dl>
+        <div class="actions">
+          <button type="button" class="btn btn-primary" data-vt="settings-save" disabled title="Save the changed settings only. VICARIUS writes one settings history line for each and stamps the file with the time and your initials.">Save manual edit settings</button>
+        </div>
+        <p class="result" data-vt="settings-result" role="status"></p>
+      </section>
+
+      {# 10. Shelf copy (store manual_edit, key archive_shelf_copy) #}
+      <section class="vt-pane" id="vt-shelf" role="tabpanel" data-vt-pane="shelf" aria-labelledby="vt-shelf-h" hidden>
+        <div class="pane-head">
+          <h2 id="vt-shelf-h">Shelf copy</h2>
+          <button type="button" class="tip" aria-label="About the Shelf" data-vt="shelf-glyph" title="The Shelf is the NAS folder where finished reconstructions wait. The account driver_svc may rename and write inside it."><span>i</span></button>
+        </div>
+        <p class="count vt-line" data-vt="shelf-meta"></p>
+        <div class="vt-drift" data-vt="shelf-drift" hidden></div>
+        <div class="vt-fields" data-vt="shelf-fields"></div>
+        <dl class="choices vt-reason-row">
+          <div>
+            <dt><label for="vt-shelf-reason">Reason</label><button type="button" class="tip" aria-label="About the reason" title="Type why the Shelf copy setting changes. VICARIUS refuses the change without a reason and writes it beside the change in the settings history."><span>?</span></button></dt>
+            <dd><input type="text" id="vt-shelf-reason" class="vt-field vt-reason" data-vt="shelf-reason" maxlength="500" autocomplete="off"></dd>
+          </div>
+        </dl>
+        <div class="actions">
+          <button type="button" class="btn btn-primary" data-vt="shelf-save" disabled title="Save the chosen Shelf copy setting after a confirmation that names what it does to the Shelf.">Save the Shelf copy setting</button>
+        </div>
+        <p class="result" data-vt="shelf-result" role="status"></p>
+      </section>
+
+      {# 11. Voyager runs (store voyager_config) #}
+      <section class="vt-pane" id="vt-runs" role="tabpanel" data-vt-pane="runs" aria-labelledby="vt-runs-h" hidden>
+        <div class="pane-head">
+          <h2 id="vt-runs-h">Voyager runs</h2>
+          <button type="button" class="tip" aria-label="About the Voyager run settings" title="The run switches stand in front of every real Voyager batch, and the Workbench removal defaults pre-tick one box in each new batch. VICARIUS keeps them in /mnt/rip/vicarius_drive/vicarius_ui_os/config/voyager.json; each batch still chooses its own Advanced settings."><span>i</span></button>
+        </div>
+        <p class="count vt-line" data-vt="runs-meta"></p>
+        <div class="vt-drift" data-vt="runs-drift" hidden></div>
+        <div class="vt-fields" data-vt="runs-fields"></div>
+        <div class="vt-planned-group" data-vt="runs-v2" hidden>
+          <h3 class="vt-field-group">Voyager 2</h3>
+          <p class="vt-line vt-state"><span class="chip role-planned" aria-hidden="true"></span>Voyager 2 settings appear with the Voyager 2 window.</p>
+        </div>
+        <dl class="choices vt-reason-row">
+          <div>
+            <dt><label for="vt-runs-reason">Reason</label><button type="button" class="tip" aria-label="About the reason" title="Type why the run settings change. VICARIUS refuses a change of a run switch without a reason and writes it beside each change in the settings history."><span>?</span></button></dt>
+            <dd><input type="text" id="vt-runs-reason" class="vt-field vt-reason" data-vt="runs-reason" maxlength="500" autocomplete="off"></dd>
+          </div>
+        </dl>
+        <div class="actions">
+          <button type="button" class="btn btn-primary" data-vt="runs-save" disabled title="Save the changed run settings. VICARIUS asks for a confirmation first when a run switch changes.">Save Voyager run settings</button>
+        </div>
+        <p class="result" data-vt="runs-result" role="status"></p>
+      </section>
+
+      {# 12. Module locks (read only until the locks store has a history write path) #}
+      <section class="vt-pane" id="vt-locks" role="tabpanel" data-vt-pane="locks" aria-labelledby="vt-locks-h" hidden>
+        <div class="pane-head">
+          <h2 id="vt-locks-h">Module locks</h2>
+          <button type="button" class="tip" aria-label="About module locks" title="A locked module shows everyone, admin included, the page &quot;Under development. Please come back later. Email Lauren for questions.&quot; The padlock in each module window's title bar locks and unlocks it, and VICARIUS keeps the state in /mnt/rip/vicarius_drive/vicarius/_METADATA/module_locks.json."><span>i</span></button>
+        </div>
+        <p class="count vt-line" data-vt="locks-meta"></p>
+        <p class="vt-line">Lock or unlock a module with the padlock in its window's title bar.</p>
+        <ul class="rows vt-striped" data-vt="locks-body"></ul>
+        <div class="actions">
+          <button type="button" class="btn" data-vt="locks-refresh">Refresh</button>
+        </div>
+        <p class="result" data-vt="locks-result" role="status"></p>
+      </section>
+
+      {# 13. Module details (read only; the Module Menu edits them) #}
+      <section class="vt-pane" id="vt-modules" role="tabpanel" data-vt-pane="modules" aria-labelledby="vt-modules-h" hidden>
+        <div class="pane-head">
+          <h2 id="vt-modules-h">Module details</h2>
+          <button type="button" class="tip" aria-label="About module details" title="Every module carries a display name, a category, a pipeline stage and a status that the desktop icons and the Module Menu show. The Module Menu's editor changes them and VICARIUS keeps the changes in /mnt/rip/vicarius_drive/vicarius_ui_os/config/module_meta.json."><span>i</span></button>
+        </div>
+        <p class="count vt-line" data-vt="modules-meta"></p>
+        <ul class="rows vt-striped" data-vt="modules-body"></ul>
+        <div class="actions">
+          <button type="button" class="btn" data-vt="modules-open" title="Open the Module Menu, whose editor changes a module's display name, description, tags, category, pipeline stage and status.">Open the Module Menu</button>
+          <button type="button" class="btn" data-vt="modules-refresh">Refresh</button>
+        </div>
+        <p class="result" data-vt="modules-result" role="status"></p>
+      </section>
+
+      {# 14. Appearance (read only; the desktop Admin window saves it) #}
+      <section class="vt-pane" id="vt-appearance" role="tabpanel" data-vt-pane="appearance" aria-labelledby="vt-appearance-h" hidden>
+        <div class="pane-head">
+          <h2 id="vt-appearance-h">Appearance</h2>
+          <button type="button" class="tip" aria-label="About the appearance" title="The desktop's look for everyone who opens it. The desktop's Admin window saves it, icon positions are saved by dragging icons on the desktop, and VICARIUS keeps both in /mnt/rip/vicarius_drive/vicarius_ui_os/config/desktop_prefs.json."><span>i</span></button>
+        </div>
+        <dl class="choices vt-readonly" data-vt="appearance-body"></dl>
+        <div class="actions">
+          <button type="button" class="btn" data-vt="appearance-open" title="Open the desktop's Admin window, which saves the appearance for everyone.">Open the Admin window</button>
+          <button type="button" class="btn" data-vt="appearance-refresh">Refresh</button>
+        </div>
+        <p class="result" data-vt="appearance-result" role="status"></p>
+      </section>
+
+      {# 15. Space floors (store driver_nas) #}
+      <section class="vt-pane" id="vt-floors" role="tabpanel" data-vt-pane="floors" aria-labelledby="vt-floors-h" hidden>
+        <div class="pane-head">
+          <h2 id="vt-floors-h">Space floors</h2>
+          <button type="button" class="tip" aria-label="About the space floors" title="Manual edit pulls, uploads and start overs read these values at the moment each copy starts. The driver's own batches read them when the driver starts, and each batch keeps the values it was created with; the NAS host, account, key, roots and the in-flight folder are never edited here."><span>i</span></button>
+        </div>
+        <p class="count vt-line" data-vt="floors-meta"></p>
+        <p class="vt-line" data-vt="floors-driver"></p>
+        <div class="vt-drift" data-vt="floors-drift" hidden></div>
+        <div class="vt-fields" data-vt="floors-fields"></div>
+        <dl class="choices vt-reason-row">
+          <div>
+            <dt><label for="vt-floors-reason">Reason</label><button type="button" class="tip" aria-label="About the reason" title="Type why the floors change. VICARIUS refuses a change of a floor without a reason and writes it beside each change in the settings history."><span>?</span></button></dt>
+            <dd><input type="text" id="vt-floors-reason" class="vt-field vt-reason" data-vt="floors-reason" maxlength="500" autocomplete="off"></dd>
+          </div>
+        </dl>
+        <div class="actions">
+          <button type="button" class="btn btn-primary" data-vt="floors-save" disabled title="Save the changed floors after a confirmation. VICARIUS rewrites only their lines of /mnt/rip/vicarius_drive/vicarius/modules/driver/github_repo/config/nas.yaml and keeps every comment.">Save space floors</button>
+        </div>
+        <p class="result" data-vt="floors-result" role="status"></p>
+      </section>
+
+      {# 16. GPU ladder (read only) #}
+      <section class="vt-pane" id="vt-gpu" role="tabpanel" data-vt-pane="gpu" aria-labelledby="vt-gpu-h" hidden>
+        <div class="pane-head">
+          <h2 id="vt-gpu-h">GPU ladder</h2>
+          <button type="button" class="tip" aria-label="About the GPU ladder" title="VOYAGER outranks VEGA, which outranks a manual edit Metashape window, which outranks a human interface holding a card, which outranks Vesper.llm. A manual edit Metashape window is a person at work that nothing ever closes automatically: a Voyager or VEGA run starts beside it only when every card and the machine have the free memory gpu_ladder.yaml names, and otherwise waits."><span>i</span></button>
+        </div>
+        <p class="count vt-line" data-vt="gpu-meta"></p>
+        <p class="result result-error" data-vt="gpu-error" hidden></p>
+        <ul class="rows vt-striped" data-vt="gpu-tiers"></ul>
+        <p class="count vt-line" data-vt="gpu-editor-line" hidden></p>
+        <div class="pane-head vt-subhead">
+          <h3 id="vt-gpu-claims-h">Claims now</h3>
+          <button type="button" class="tip" aria-label="About the claims" title="A claim is a running job's hold on a card, recorded by VICARIUS when the job starts and dropped when it ends; a process holding a card with no claim is listed as unclaimed."><span>i</span></button>
+        </div>
+        <ul class="rows vt-striped" data-vt="gpu-claims"></ul>
+        <div class="actions">
+          <button type="button" class="btn" data-vt="gpu-refresh">Refresh</button>
+        </div>
+        <p class="result" data-vt="gpu-result" role="status"></p>
+      </section>
+
+      {# 17. Settings history (settings_history.csv, newest first) #}
+      <section class="vt-pane" id="vt-history" role="tabpanel" data-vt-pane="history" aria-labelledby="vt-history-h" hidden>
+        <div class="pane-head">
+          <h2 id="vt-history-h">Settings history</h2>
+          <button type="button" class="tip" aria-label="About the settings history" title="The settings history is one line per changed setting: when, who, which setting, the old and the new value, and the reason. VICARIUS appends to /mnt/rip/vicarius_drive/vicarius/_METADATA/settings_history.csv and never rewrites a line."><span>i</span></button>
+        </div>
+        <dl class="choices vt-history-filters">
+          <div>
+            <dt><label for="vt-history-store">Store</label><button type="button" class="tip" aria-label="About the store filter" title="Choose the settings file whose lines to list, or every store."><span>?</span></button></dt>
+            <dd><select id="vt-history-store" class="vt-field" data-vt="history-store">
+              <option value="">Every store</option>
+              <option value="manual_edit">Manual edit settings and Shelf copy</option>
+              <option value="voyager_config">Voyager runs</option>
+              <option value="driver_nas">Space floors</option>
+              <option value="desktop_prefs">Appearance and icon layout</option>
+              <option value="module_locks">Module locks</option>
+              <option value="module_meta">Module details</option>
+              <option value="voyagerparams">Parameter defaults</option>
+            </select></dd>
+          </div>
+          <div>
+            <dt><label for="vt-history-key">Setting</label><button type="button" class="tip" aria-label="About the setting filter" title="Type part of a setting's key, for example scale_error, to list only its lines."><span>?</span></button></dt>
+            <dd><input type="text" id="vt-history-key" class="vt-field w-name" data-vt="history-key" maxlength="200" autocomplete="off" spellcheck="false"></dd>
+          </div>
+          <div>
+            <dt><label for="vt-history-since">Since</label><button type="button" class="tip" aria-label="About the since filter" title="Type the first day to list as YYYY-MM-DD. VICARIUS lists lines saved on that day or later."><span>?</span></button></dt>
+            <dd><input type="text" id="vt-history-since" class="vt-field w-day" data-vt="history-since" placeholder="YYYY-MM-DD" maxlength="10" inputmode="numeric" autocomplete="off" spellcheck="false">
+                <button type="button" class="btn btn-mini" data-vt="history-clear" hidden>Clear filters</button></dd>
+          </div>
+        </dl>
+        <p class="count vt-line" data-vt="history-meta"></p>
+        <ul class="vt-problems" data-vt="history-problems"></ul>
+        <div class="vt-table-wrap">
+          <table class="vt-table" data-vt="history-table">
+            <thead><tr><th scope="col">Saved</th><th scope="col">Setting</th><th scope="col">Old</th><th scope="col">New</th><th scope="col">Reason</th></tr></thead>
+            <tbody data-vt="history-body"></tbody>
+          </table>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn" data-vt="history-csv" disabled title="Copy the lines listed, every cell quoted, for a spreadsheet. A cell that would start a formula gets a leading apostrophe.">Copy as CSV</button>
+          <button type="button" class="btn" data-vt="history-refresh">Refresh</button>
+        </div>
+        <p class="result" data-vt="history-result" role="status"></p>
+      </section>

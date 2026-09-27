@@ -1,8 +1,9 @@
 """
 Module: voyagertools
-Purpose: Python package of the Voyager tools module. The parameter store
-         (paramsstore.py) reads and writes the voyagerparams checkout; the
-         tool modules of the admin page arrive with plan task B6'.
+Purpose: Python package of the voyager_tools module, shown as the Atlas
+         control panel. The parameter store (paramsstore.py) reads and writes
+         the voyagerparams checkout; views.py is the blueprint and the other
+         modules hold the logic of the panel's tools.
 Inputs:  none at import time.
 Outputs: none at import time.
 """

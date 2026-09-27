@@ -35,7 +35,9 @@ import shutil
 from collections.abc import Callable, Mapping
 
 ACTOR_PREFIX = "voyager_tools:"
-INITIALS_PATTERN = re.compile(r"^[A-Za-z0-9]{1,8}$")
+# Two to four letters after trimming and upper-casing: the registry's
+# MANUAL_EDIT_INITIALS_PATTERN, the one initials rule of the manual edit chain.
+INITIALS_PATTERN = re.compile(r"^[A-Z]{2,4}$")
 # A processing folder is named {SITE}_{T#}_3D (MRS_T1_3D). Until 2026-09-08 it
 # carried a season and ended "_3dprocessing", specific enough that a suffix test
 # was a safe guard on its own; "_3D" is not, so this tests the whole shape.
@@ -70,7 +72,7 @@ CLEAN_MANUAL_EDIT_RESET = "clean_manual_edit"
 PROCESSING_LOCATION_CELL = "processing_location"
 HISTORY_TAIL = 8
 LOG_TAIL = 20
-CANCEL_REASON = "cancelled from Voyager tools"
+CANCEL_REASON = "cancelled from the Atlas control panel"
 
 
 class CancelRefused(ValueError):
@@ -78,17 +80,18 @@ class CancelRefused(ValueError):
 
 
 def actor(initials) -> str:
-    """The registry actor for a Voyager tools action: voyager_tools:<INITIALS>.
+    """The registry actor for an Atlas control panel action: voyager_tools:<INITIALS>.
 
     Raises:
         TypeError: when initials is not a string.
-        ValueError: when it is blank or carries characters other than letters and digits.
+        ValueError: when it is not two to four letters after trimming.
     """
     if not isinstance(initials, str):
         raise TypeError(f"initials must be a string, got {type(initials).__name__}")
-    if not INITIALS_PATTERN.match(initials.strip()):
-        raise ValueError(f"initials must be one to eight letters or digits, got {initials!r}")
-    return ACTOR_PREFIX + initials.strip().upper()
+    clean = initials.strip().upper()
+    if not INITIALS_PATTERN.fullmatch(clean):
+        raise ValueError(f"initials must be two to four letters, got {initials!r}")
+    return ACTOR_PREFIX + clean
 
 
 def _require_job(job) -> Mapping:

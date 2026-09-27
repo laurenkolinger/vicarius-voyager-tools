@@ -1,6 +1,6 @@
 {#
   File:    templates/voyager_tools/index.html
-  Purpose: The standalone Voyager tools page: the fragment (panel.html)
+  Purpose: The standalone Atlas control panel page: the fragment (panel.html)
            inside the design language's page chrome. The page links the
            shared block (vicarius_workflow.css, vicarius_tooltips.js), the
            state-role stylesheet (vicarius_roles.css) and the fragment
@@ -15,7 +15,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Voyager tools - VICARIUS</title>
+  <title>Atlas control panel - VICARIUS</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet"
@@ -36,5 +36,6 @@
   <script>window.VOYAGER_TOOLS_BASE = {{ base|tojson }};</script>
   <script src="{{ base }}/static/vicarius_tooltips.js?v={{ v }}"></script>
   <script src="{{ base }}/static/voyager_tools.js?v={{ v }}"></script>
+  <script src="{{ base }}/static/vt_settings.js?v={{ v }}"></script>
 </body>
 </html>
