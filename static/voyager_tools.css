@@ -12,8 +12,9 @@
  * list (not a stage rail, since the panes are not a sequence), the settings
  * rows, drift line and history table of the settings panes, the
  * generic select and textarea sizing the shared block leaves to the page,
- * the confirm dialog, the parameter editor, the diff list, the rewind plan
- * and the rendered prompts document.
+ * the confirm dialog, the parameter editor, the diff list, the rewind plan,
+ * the rendered prompts document, the Uploads and Timelines panes with the
+ * timelines drawer, and the upload progress window's layer.
  */
 
 .voyager-tools {
@@ -375,6 +376,109 @@
 .voyager-tools .vt-field.w-day { width: 132px; }
 /* An unclaimed process: the short name wraps rather than hiding the pid chip. */
 .voyager-tools .row-name.vt-process { white-space: normal; overflow-wrap: anywhere; }
+
+/* -- the Uploads and Timelines panes ------------------------------------------
+   A list or table title under the pane heading carries its "i" glyph and, at
+   its right, its mini buttons (Tick all, Untick all) or a count. */
+.voyager-tools .vt-list-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 16px 0 4px; }
+.voyager-tools .vt-list-title { margin: 0; font: 700 14px/1.3 var(--font-display, 'Syne', sans-serif); color: var(--text, #F5EDF0); }
+.voyager-tools div > .vt-list-title:first-child { margin: 16px 0 4px; }
+.voyager-tools .vt-list-tools { display: inline-flex; gap: 8px; margin-left: auto; }
+.voyager-tools .vt-list-tools[hidden] { display: none; }
+.voyager-tools .vt-list-head > .count { margin-left: auto; }
+.voyager-tools .vt-up-pick { gap: 8px; min-width: 0; }
+.voyager-tools .vt-up-pick input { flex: none; }
+.voyager-tools .row-name .vt-site, .voyager-tools .row-name { font-weight: 700; }
+.voyager-tools .row-name .vt-site { font-family: var(--font-body, 'Inter', ui-sans-serif, sans-serif); font-weight: 500; }
+.voyager-tools .vt-error-text { color: var(--error, #FF4D6D); font-size: 12px; }
+/* The summary line: Inter 13 px dim words around Space Mono 700 figures
+   (matrix window design 6.1). */
+.voyager-tools .vt-summary { margin: 4px 0 8px; font: 400 13px/1.5 var(--font-body, 'Inter', ui-sans-serif, sans-serif); color: var(--text-dim, #b0a7ab); }
+.voyager-tools .vt-summary b { font: 700 13px/1.5 var(--font-mono, 'Space Mono', ui-monospace, monospace); color: var(--text, #F5EDF0); }
+.voyager-tools .vt-summary .vt-stamp { margin-left: 8px; white-space: nowrap; }
+.voyager-tools .vt-tl-table td { white-space: normal; }
+.voyager-tools .vt-tl-table td:last-child { min-width: 0; overflow-wrap: normal; }
+.voyager-tools .vt-tl-table th.vt-num, .voyager-tools .vt-tl-table td.vt-num { text-align: right; white-space: nowrap; }
+.voyager-tools .vt-tl-table .id.code { white-space: nowrap; }
+.voyager-tools .vt-tl-table .vt-by, .voyager-tools .vt-tl-table .vt-running { display: block; margin-top: 2px; font-size: 12px; white-space: nowrap; }
+.voyager-tools .vt-tl-table .vt-running { color: var(--text, #F5EDF0); }
+.voyager-tools .vt-tl-table td.vt-num .vt-by { white-space: normal; text-align: right; }
+.voyager-tools .vt-tl-chip { display: block; }
+.voyager-tools .vt-tl-table tbody tr[data-vt-tl-row] { cursor: pointer; }
+.voyager-tools .vt-tl-open {
+  display: block;
+  min-height: 28px;
+  padding: 0;
+  margin: 0 0 2px;
+  background: none;
+  border: 0;
+  color: var(--text, #F5EDF0);
+  font: 500 13px/1.4 var(--font-body, 'Inter', ui-sans-serif, sans-serif);
+  text-align: left;
+  cursor: pointer;
+}
+.voyager-tools .vt-tl-open:hover { color: var(--pink, #FFB3D9); }
+.voyager-tools .vt-tl-open:focus-visible { outline: 2px solid var(--pink, #FFB3D9); outline-offset: 2px; }
+.voyager-tools .vt-tl-filters { margin-top: 12px; }
+.voyager-tools .vt-tl-table th, .voyager-tools .vt-tl-table td { padding: 6px 8px; }
+.voyager-tools .vt-tl-table td.vt-num { min-width: 60px; }
+.voyager-tools .vt-tl-table td.vt-num .vt-by { min-width: 80px; }
+/* The project line under a transect wraps after its comma, so the first
+   column stays as narrow as the Metashape project chip. */
+.voyager-tools .vt-tl-table td:first-child .vt-by { white-space: normal; }
+.voyager-tools .vt-nowrap { white-space: nowrap; }
+/* The four filters as two definition lists side by side while the pane is
+   wide (matrix window design 6.2), one column when it is narrow. */
+@container (min-width: 1060px) {
+  .voyager-tools .vt-tl-filters { grid-template-columns: var(--label-w) minmax(0, 1fr) calc(var(--label-w) + 32px) minmax(0, 1fr); }
+  .voyager-tools .vt-tl-filters > div:nth-child(2) dt, .voyager-tools .vt-tl-filters > div:nth-child(2) dd { border-top: 0; }
+  .voyager-tools .vt-tl-filters > div:nth-child(even) dt { padding-left: 32px; }
+  .voyager-tools .vt-tl-filters select.vt-field { min-width: 0; width: 100%; }
+}
+/* The row drawer: full width between the filters and the transects table
+   (matrix window design 6.5, the narrow form), a --border edge and a shadow. */
+.voyager-tools .vt-drawer {
+  margin: 12px 0;
+  padding: 12px 16px 16px;
+  background: var(--bg, #0a0a0f);
+  border: 1px solid var(--border, #2a2a38);
+  border-left: 2px solid var(--magenta, #E20074);
+  border-radius: var(--radius-lg, 3px);
+  box-shadow: 0 6px 24px rgba(5, 5, 8, 0.6);
+}
+.voyager-tools .vt-drawer[hidden] { display: none; }
+.voyager-tools .vt-drawer-head { display: flex; align-items: center; gap: 8px; }
+.voyager-tools .vt-drawer-head h3 { margin: 0; flex: 1 1 auto; font: 700 16px/1.3 var(--font-mono, 'Space Mono', ui-monospace, monospace); }
+.voyager-tools .vt-drawer-head h3 .vt-site, .voyager-tools .vt-drawer-head h3 { overflow-wrap: anywhere; }
+.voyager-tools .vt-drawer-sub { margin: 12px 0 4px; font: 700 13px/1.3 var(--font-display, 'Syne', sans-serif); }
+.voyager-tools .vt-table-wrap.vt-keep:has(tbody:empty) { display: block; }
+.voyager-tools .vt-note-kind { font-family: var(--font-body, 'Inter', ui-sans-serif, sans-serif); font-weight: 600; }
+.voyager-tools .vt-note-text { grid-column: 1 / -1; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The upload progress window: the editor's component (manual_edit_upload.js,
+   styled by manual_edit.css under .me-upload) in a dialog on the page body,
+   rooted in .voyager-tools so the panel's shared block styles its buttons
+   inside a desktop window too. */
+.voyager-tools.vt-upload-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 9300;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 24px 12px;
+  background: rgba(5, 5, 8, 0.72);
+  overflow-y: auto;
+  container-type: normal;
+}
+.voyager-tools .vt-upload-dialog {
+  width: min(720px, 100%);
+  padding: 20px 20px 16px;
+  background: var(--surface, #11111a);
+  border: 1px solid var(--border, #2a2a38);
+  border-radius: var(--radius-lg, 3px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+}
+.voyager-tools .vt-upload-dialog:focus { outline: none; }
 
 /* -- a narrow container (the desktop window opens about 720 px wide) -------
    The pane list stays a vertical rail, narrower, with wrapping names, so

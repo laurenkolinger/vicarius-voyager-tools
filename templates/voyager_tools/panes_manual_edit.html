@@ -1,0 +1,111 @@
+{#
+  File:    templates/voyager_tools/panes_manual_edit.html
+  Purpose: The manual edit panes of the Atlas control panel (program C spec
+           sections 3.7 to 3.9, 4.12 and 5.5), included by panel.html inside
+           <div class="vt-panes">: Uploads (static/vt_uploads.js, over
+           program B's /manual-edit/api routes) and Timelines
+           (static/vt_timelines.js, over /voyager-tools/api/timelines).
+           Var-free: every list and table is filled by its script. The
+           upload progress window is not here: vt_uploads.js appends it to
+           the page body so a relock that hides the panel leaves it open.
+#}
+
+      {# Uploads #}
+      <section class="vt-pane" id="vt-uploads" role="tabpanel" data-vt-pane="uploads" aria-labelledby="vt-uploads-h" hidden>
+        <div class="pane-head">
+          <h2 id="vt-uploads-h">Uploads</h2>
+          <button type="button" class="tip" aria-label="About uploads" title="An upload set copies transects marked for re-upload from the edit bench to the Shelf one after another, verifies each strictly and removes its bench copy. VICARIUS keeps a set running after admin mode ends; anyone may watch it and only an admin may stop it."><span>i</span></button>
+        </div>
+        <p class="count vt-line" data-vt="uploads-meta"></p>
+        <div class="vt-list-head">
+          <h3 class="vt-list-title" id="vt-uploads-ready-h">Marked for re-upload</h3>
+          <span class="vt-list-tools" data-vt="uploads-ticks" hidden>
+            <button type="button" class="btn btn-mini" data-vt="uploads-tick-all">Tick all</button>
+            <button type="button" class="btn btn-mini" data-vt="uploads-untick-all">Untick all</button>
+          </span>
+        </div>
+        <ul class="rows vt-striped" data-vt="uploads-ready" aria-labelledby="vt-uploads-ready-h"></ul>
+        <div class="actions">
+          <button type="button" class="btn btn-primary" data-vt="uploads-start" disabled title="Upload the ticked transects in one upload set, after a confirmation that names each one and what happens to its Shelf copy. VICARIUS then opens the progress window the editor sees at Finish project.">Upload ticked</button>
+          <button type="button" class="btn" data-vt="uploads-refresh">Refresh</button>
+        </div>
+        <p class="result" data-vt="uploads-result" role="status"></p>
+        <div data-vt="uploads-running-wrap" hidden>
+          <h3 class="vt-list-title" id="vt-uploads-running-h">Uploading</h3>
+          <ul class="rows vt-striped" data-vt="uploads-running" aria-labelledby="vt-uploads-running-h"></ul>
+        </div>
+        <div data-vt="uploads-review-wrap" hidden>
+          <div class="vt-list-head">
+            <h3 class="vt-list-title" id="vt-uploads-review-h">In admin review</h3>
+            <button type="button" class="tip" aria-label="About admin review" title="A transect whose checks failed, or that came back from an earlier review, waits on the edit bench for an admin's decision. VICARIUS offers it for upload only once an admin marks it for upload."><span>i</span></button>
+          </div>
+          <ul class="rows vt-striped" data-vt="uploads-review" aria-labelledby="vt-uploads-review-h"></ul>
+        </div>
+        <div class="vt-list-head">
+          <h3 class="vt-list-title" id="vt-uploads-recent-h">Running and recent uploads</h3>
+          <button type="button" class="tip" aria-label="About recent uploads" title="Every upload set started in the last 7 days, newest first, from this panel or from Finish project. Watch reopens its progress window."><span>i</span></button>
+        </div>
+        <ul class="rows vt-striped" data-vt="uploads-recent" aria-labelledby="vt-uploads-recent-h"></ul>
+      </section>
+
+      {# Timelines #}
+      <section class="vt-pane" id="vt-timelines" role="tabpanel" data-vt-pane="timelines" aria-labelledby="vt-timelines-h" hidden>
+        <div class="pane-head">
+          <h2 id="vt-timelines-h">Timelines</h2>
+          <button type="button" class="tip" aria-label="About timelines" title="A timeline is how long each transect of a manual edit project spent at each step: pulled to the edit bench, editing, open in Metashape, in admin review, waiting for upload, uploaded. VICARIUS reads the times from the registry's status changes and the project's own record, never from a stored counter."><span>i</span></button>
+        </div>
+        <p class="vt-summary" data-vt="tl-summary"></p>
+        <div class="vt-list-head">
+          <h3 class="vt-list-title" id="vt-tl-projects-h">Manual edit projects</h3>
+          <button type="button" class="tip" aria-label="About manual edit projects" title="Finished is when the editor pressed Finish project. Completed is when VICARIUS had uploaded, verified and removed every transect of the project from the edit bench."><span>i</span></button>
+        </div>
+        <div class="vt-table-wrap">
+          <table class="vt-table vt-tl-table" aria-labelledby="vt-tl-projects-h">
+            <thead><tr><th scope="col">Project</th><th scope="col">Created</th><th scope="col">Finished</th><th scope="col">Completed</th><th scope="col">Progress</th><th scope="col">Transects by state</th></tr></thead>
+            <tbody data-vt="tl-projects"></tbody>
+          </table>
+        </div>
+        <dl class="choices vt-tl-filters">
+          <div>
+            <dt><label for="vt-tl-job">Manual edit project</label><button type="button" class="tip" aria-label="About the project filter" title="Choose one manual edit project to list only its transects."><span>?</span></button></dt>
+            <dd><select id="vt-tl-job" class="vt-field" data-vt="tl-job"><option value="">Every project</option></select></dd>
+          </div>
+          <div>
+            <dt><label for="vt-tl-state">State</label><button type="button" class="tip" aria-label="About the state filter" title="Choose a state to list only the transects in it now. VICARIUS offers only the states some transect is in."><span>?</span></button></dt>
+            <dd><select id="vt-tl-state" class="vt-field" data-vt="tl-state"><option value="">Every state</option></select></dd>
+          </div>
+          <div>
+            <dt><label for="vt-tl-editor">Editor</label><button type="button" class="tip" aria-label="About the editor filter" title="Choose the initials of the person who certified the transect, or who started its project when nobody has yet."><span>?</span></button></dt>
+            <dd><select id="vt-tl-editor" class="vt-field" data-vt="tl-editor"><option value="">Every editor</option></select></dd>
+          </div>
+          <div>
+            <dt><label for="vt-tl-since">Since</label><button type="button" class="tip" aria-label="About the since filter" title="Type the first day as YYYY-MM-DD. VICARIUS lists the transects of projects created on that day or later."><span>?</span></button></dt>
+            <dd><input type="text" id="vt-tl-since" class="vt-field w-day" data-vt="tl-since" placeholder="YYYY-MM-DD" maxlength="10" inputmode="numeric" autocomplete="off" spellcheck="false">
+                <button type="button" class="btn btn-mini" data-vt="tl-clear" hidden>Clear filters</button></dd>
+          </div>
+        </dl>
+        <section class="vt-drawer" data-vt="tl-drawer" role="dialog" aria-labelledby="vt-tl-drawer-h" hidden>
+          <div class="vt-drawer-head">
+            <h3 id="vt-tl-drawer-h" data-vt="tl-drawer-title"></h3>
+            <button type="button" class="btn btn-mini" data-vt="tl-drawer-close">Close</button>
+          </div>
+          <p class="count vt-line" data-vt="tl-drawer-sub"></p>
+          <div data-vt="tl-drawer-body"></div>
+        </section>
+        <div class="vt-list-head">
+          <h3 class="vt-list-title" id="vt-tl-rows-h">Transects</h3>
+          <button type="button" class="tip" aria-label="About the transect times" title="Editing, Review and Upload wait sum the spells in each registry status; Metashape counts the time between each open and its close. Total runs from the pull to the upload, or to now while the transect is on the edit bench."><span>i</span></button>
+          <span class="count" data-vt="tl-count"></span>
+        </div>
+        <div class="vt-table-wrap">
+          <table class="vt-table vt-tl-table" aria-labelledby="vt-tl-rows-h">
+            <thead><tr><th scope="col">Transect</th><th scope="col">State</th><th scope="col">Pulled</th><th scope="col" class="vt-num">Editing</th><th scope="col" class="vt-num">Metashape</th><th scope="col" class="vt-num">Review</th><th scope="col" class="vt-num">Upload wait</th><th scope="col">Uploaded</th><th scope="col" class="vt-num">Total</th></tr></thead>
+            <tbody data-vt="tl-rows"></tbody>
+          </table>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn" data-vt="tl-csv" disabled title="Copy the transects listed, every cell quoted, for a spreadsheet. A cell that would start a formula gets a leading apostrophe.">Copy as CSV</button>
+          <button type="button" class="btn" data-vt="tl-refresh">Refresh</button>
+        </div>
+        <p class="result" data-vt="tl-result" role="status"></p>
+      </section>

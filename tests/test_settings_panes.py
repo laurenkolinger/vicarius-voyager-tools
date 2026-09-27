@@ -250,6 +250,8 @@ class PanesCase(unittest.TestCase):
         """Build the harness, run it in Chrome, and return the results the steps reported.
 
         initials=None leaves the initials field as the panel seeded it;
+        settings_first loads vt_settings.js before the pane seam, the rest
+        in the fragment's order (views.PANEL_SCRIPTS);
         head_js runs before the panel scripts (a fake desktop global, a
         session value); head_html is markup placed after head_js and
         before the panel (a desktop script and its elements);
@@ -259,7 +261,11 @@ class PanesCase(unittest.TestCase):
         """
         routing = "<script>window.__ROUTES__ = " + json.dumps(routes or self.base_routes()) + ";</script>"
         section = f'<div class="win-body">{self.section}</div>' if wrap else self.section
-        scripts = [SETTINGS_JS, PANEL_JS] if settings_first else [PANEL_JS, SETTINGS_JS]
+        # Every panel script the fragment lists, in its order, so a later
+        # pane's script runs in the same page as the panes under test.
+        scripts = [CLONE / "static" / name for name in views.PANEL_SCRIPTS]
+        if settings_first:
+            scripts = [SETTINGS_JS] + [path for path in scripts if path != SETTINGS_JS]
         tags = "".join(f'<script src="file://{path}"></script>' for path in scripts)
         body = ("(async function(){ var results = {};"
                 "var pre = document.createElement('pre'); pre.id = 'results'; document.body.appendChild(pre);"

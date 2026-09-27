@@ -18,8 +18,8 @@ display_name: "Atlas control panel"
 tags: ["3D", "TCRMP"]
 hidden: false
 hidden_reason: ""
-version: "0.3.0"
-description: "The restricted settings and tools of the atlas, the Voyager runs, the manual edit and the desktop: the processing order, the camera model per season, the manual edit settings and the Shelf copy setting, the Voyager run switches, the parameter defaults in voyagerparams, rewind and spot redo, clean workbench and clean manual edit run, the space floors, the GPU ladder, module locks, module details, the desktop appearance, and the settings history."
+version: "0.4.0"
+description: "The restricted settings and tools of the atlas, the Voyager runs, the manual edit and the desktop: the processing order, the camera model per season, the manual edit settings and the Shelf copy setting, the Voyager run switches, the parameter defaults in voyagerparams, rewind and spot redo, clean workbench and clean manual edit run, the manual edit uploads and timelines, the space floors, the GPU ladder, module locks, module details, the desktop appearance, and the settings history."
 author: "Lauren Olinger"
 created: "2026-09-04"
 

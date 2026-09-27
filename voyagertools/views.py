@@ -10,6 +10,9 @@ Purpose: The web layer of the Atlas control panel (module voyager_tools;
          tab), and the JSON API of the eight tools: the processing order,
          clean workbench, clean manual edit run, rewind, spot redo, the
          prompts doc, the parameter defaults and the camera model table. The
+         Timelines routes live in manual_edit_views.py on the same
+         blueprint; the Uploads pane reads and starts uploads through the
+         manual edit module's own /manual-edit/api routes. The
          settings panes of the panel read and write the desktop's own
          /api/settings routes (vicarius_ui_os/settings_views.py), not routes
          of this blueprint. A parameter default or branch save is written
@@ -58,12 +61,15 @@ URL_PREFIX = "/voyager-tools"
 MODULE_SLUG = "voyager_tools"
 DISPLAY_NAME = "Atlas control panel"
 UI_STYLE = "voyager_tools"
-ASSET_VERSION = "20260927f"
+ASSET_VERSION = "20260927g"
 ROOT_SECTION_PREFIX = '<section class="voyager-tools"'
 STATIC_JS = "voyager_tools.js"
 STATIC_SETTINGS_JS = "vt_settings.js"  # the settings and desktop panes (program C spec 5.3)
+STATIC_UPLOADS_JS = "vt_uploads.js"  # the Uploads pane (milestone C7)
+STATIC_TIMELINES_JS = "vt_timelines.js"  # the Timelines pane (milestone C8)
 STATIC_CSS = "voyager_tools.css"
-PANEL_SCRIPTS = (STATIC_JS, STATIC_SETTINGS_JS)  # load order: the pane seam first
+# Load order: the pane seam first, then one script per group of panes.
+PANEL_SCRIPTS = (STATIC_JS, STATIC_SETTINGS_JS, STATIC_UPLOADS_JS, STATIC_TIMELINES_JS)
 TOOL_PARAM = "tool"
 TOOL_PANEL = "panel"
 MOUNT_WINDOW = "VoyagerTools.mount"
@@ -1191,3 +1197,7 @@ __all__ = [
     "URL_PREFIX", "MODULE_SLUG", "DISPLAY_NAME", "UI_STYLE", "ASSET_VERSION", "ROOT_SECTION_PREFIX",
     "LOCK_MESSAGE", "ADMIN_ERROR", "ADMIN_MESSAGE", "PROMPTS_DOC", "PARAMS_HISTORY_ONLY_ON_DESKTOP",
 ]
+
+# The manual edit routes (the Timelines pane) register on the same blueprint;
+# imported last because they use the gates and seams defined above.
+from . import manual_edit_views  # noqa: E402,F401  (registers routes on voyager_tools_bp)
