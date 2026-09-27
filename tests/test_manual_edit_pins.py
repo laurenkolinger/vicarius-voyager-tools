@@ -122,7 +122,7 @@ class UploadsHelpers(unittest.TestCase):
     def test_status_roles(self):
         out = run_node(UPLOADS_JS, "return ['queued','running','done','failed','stopped','interrupted','odd']"
                                    ".map(h.statusRole);")
-        self.assertEqual(out, ["role-planned", "role-in-progress", "role-machine", "role-failed", "role-attention",
+        self.assertEqual(out, ["role-planned", "role-in-progress", "role-verified", "role-failed", "role-attention",
                                "role-attention", "role-empty"])
 
 
@@ -190,6 +190,24 @@ class TimelinesHelpers(unittest.TestCase):
                                      " h.pullLine(null)];")
         self.assertEqual(out, ["Copying, 25 percent", "Verifying", "Waiting to upload", "Checks window open", "",
                                "Pulling to the edit bench, 25 percent", "", ""])
+
+    def test_an_upload_set_that_cannot_be_read_is_named_with_its_reason(self):
+        out = run_node(TIMELINES_JS, "return [h.runningLine({upload: {upload_id: 'UP-20260927-140000-LO',"
+                                     " error: 'no upload set under /x/uploads.'}}),"
+                                     " h.runningLine({upload: {upload_id: 'UP-1', error: 'bad', item_state: 'copying'}})];")
+        self.assertEqual(out, ["Upload set UP-20260927-140000-LO could not be read: no upload set under /x/uploads",
+                               "Upload set UP-1 could not be read: bad"])
+
+    def test_phase_words_name_a_failed_step(self):
+        out = run_node(TIMELINES_JS, "return ['draft', 'pulling', 'editing', 'done', 'cancelled', 'failed_pulling',"
+                                     " 'failed_some_step', 'odd', null].map(h.phaseWords);")
+        self.assertEqual(out, ["draft", "pulling", "editing", "complete", "cancelled", "failed while pulling",
+                               "failed while some step", "odd", ""])
+
+    def test_actor_words_show_initials_and_the_source_in_words(self):
+        out = run_node(TIMELINES_JS, "return ['manual_edit:LO', 'seed', 'voyager_1:CC', ':LO', 'manual_edit:', null,"
+                                     " 'a:b:LO'].map(h.actorWords);")
+        self.assertEqual(out, ["LO, manual edit", "seed", "CC, voyager 1", ":LO", "manual_edit:", "", "LO, a:b"])
 
     def test_state_roles(self):
         out = run_node(TIMELINES_JS, "return ['todo','editing','review','upload','uploading','restarting','done','odd']"

@@ -42,7 +42,8 @@
   var JOBS_ROUTE = MANUAL_EDIT_BASE + "/api/jobs?active=1";
   var UPLOADS_ROUTE = MANUAL_EDIT_BASE + "/api/uploads";
   var SHELF_ROUTE = "/api/settings/shelf";
-  var STATUS_ROLES = { queued: "role-planned", running: "role-in-progress", done: "role-machine", failed: "role-failed",
+  // A done set is strictly verified, the role the Timelines pane gives an uploaded transect.
+  var STATUS_ROLES = { queued: "role-planned", running: "role-in-progress", done: "role-verified", failed: "role-failed",
                        stopped: "role-attention", interrupted: "role-attention" };
   var STATUS_WORDS = { queued: "queued", running: "running", done: "done", failed: "failed", stopped: "stopped",
                        interrupted: "interrupted" };
@@ -53,7 +54,9 @@
   var LINE_TICK_FIRST = "Tick at least one transect to upload.";
   var LINE_NO_COMPONENT = "The upload progress window could not load; the upload continues on the server.";
   var TIP_WATCH = "Open the progress window of this upload set. VICARIUS shows Stop only in admin mode.";
-  var TIP_TICK = "Tick this to put the transect in the next upload set.";
+  // The transect state words of the project cards (manualedit.jobstore.STATE_WORDS), for the rows drawn here.
+  var WORDS_UPLOADING = "Uploading in";
+  var WORDS_REVIEW = "Marked for admin review";
 
   /* ---- pure helpers (exported to node) --------------------------------------- */
 
@@ -159,17 +162,19 @@
     return '<span class="vt-state"><span class="chip ' + esc(role) + '" aria-hidden="true"></span>' + esc(words) + "</span>";
   }
 
-  function projectMetaHtml(item) {
-    return '<span class="row-meta"><span class="count">project ' + esc(item.job_id) + "</span>" +
-      '<span class="count">editor ' + esc(item.editor) + "</span></span>";
+  // projectMetaHtml(item, extra): the project as a chip, who started it, and
+  // any extra count line (the edit round), each its own span in the meta row.
+  function projectMetaHtml(item, extra) {
+    return '<span class="row-meta"><span class="count">project ' + chip(item.job_id) + "</span>" +
+      '<span class="count">started by ' + esc(item.editor) + "</span>" + (extra || "") + "</span>";
   }
 
   function readyRowHtml(item, index, ticked) {
     var label = transectWords(item);
-    return '<li class="row vt-up-row"><span class="row-name"><label class="opt vt-up-pick" title="' + esc(TIP_TICK) + '">' +
+    return '<li class="row vt-up-row"><span class="row-name"><label class="opt vt-up-pick">' +
       '<input type="checkbox" data-vt-up-tick="' + index + '"' + (ticked ? " checked" : "") +
-      ' aria-label="' + esc("Tick " + label + " for upload") + '"> ' + nameHtml(item) + "</label></span>" +
-      '<span class="row-act">' + chip(item.psx) + "</span>" + projectMetaHtml(item) + "</li>";
+      ' aria-label="' + esc("Tick " + label + " for upload") + '"> ' + nameHtml(item) + " " + chip(item.psx) +
+      "</label></span>" + projectMetaHtml(item) + "</li>";
   }
 
   function watchButtonHtml(uploadId) {
@@ -179,15 +184,15 @@
   function runningRowHtml(item) {
     return '<li class="row"><span class="row-name">' + nameHtml(item) + " " + chip(item.psx) + "</span>" +
       '<span class="row-act">' + watchButtonHtml(item.upload_id) + "</span>" +
-      '<span class="row-state">' + stateHtml("role-in-progress", "uploading in") + " " + chip(item.upload_id) + "</span>" +
+      '<span class="row-state">' + stateHtml("role-in-progress", WORDS_UPLOADING) + " " + chip(item.upload_id) + "</span>" +
       projectMetaHtml(item) + "</li>";
   }
 
   function reviewRowHtml(item) {
     var round = item.round > 0 ? '<span class="count">edit round ' + esc(item.round + 1) + "</span>" : "";
     return '<li class="row"><span class="row-name">' + nameHtml(item) + " " + chip(item.psx) + "</span>" +
-      '<span class="row-state">' + stateHtml("role-attention", "marked for admin review") + round + "</span>" +
-      projectMetaHtml(item) + "</li>";
+      '<span class="row-state">' + stateHtml("role-attention", WORDS_REVIEW) + "</span>" +
+      projectMetaHtml(item, round) + "</li>";
   }
 
   function stampWords(iso) {

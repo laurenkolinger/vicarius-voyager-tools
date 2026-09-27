@@ -5,15 +5,16 @@ Purpose: The manual edit routes of the Atlas control panel (program C spec
          section 5.3): the Timelines pane's GET /voyager-tools/api/timelines
          and /voyager-tools/api/timelines/detail (milestone C8, spec 4.12),
          registered on the same blueprint as views.py, which imports this
-         module at its end. Both routes read only: the job records through
+         module at its end. Both routes read: the job records through
          the manual edit job store, program A's status intervals and notes
          through the registry library, program B's edit time through
          manualedit.jobstore.edit_time. The Uploads pane (milestone C7)
          needs no route here: it reads and starts uploads through program
          B's own /manual-edit/api routes.
 Inputs:  HTTP GET requests with optional filters; deps.job_store(),
-         deps.registry(), deps.site_name, deps.now_iso.
-Outputs: JSON; nothing is written.
+         deps.registry(), deps.site_name, deps.now_iso, deps.recover_uploads.
+Outputs: JSON. The only write is the manual edit module's recovery of
+         upload sets a desktop restart stranded (deps.recover_uploads).
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ import re
 from collections.abc import Mapping
 from datetime import date, datetime
 
-from flask import jsonify, request
+from flask import current_app, jsonify, request
 
 from . import timelines
 from . import views
@@ -103,12 +104,13 @@ def _read_registry(read):
 
 
 def _upload_reader(store, jobstore_module):
-    """upload id -> the upload set record, or None when it cannot be read."""
+    """upload id -> (the upload set record, "") or (None, the reason it cannot be read, logged once as a warning)."""
     def read(upload_id: str):
         try:
-            return store.load_upload_set(upload_id)
-        except (jobstore_module.JobStoreError, ValueError, TypeError, OSError):
-            return None
+            return store.load_upload_set(upload_id), ""
+        except (jobstore_module.JobStoreError, ValueError, TypeError, OSError) as exc:
+            current_app.logger.warning("voyager tools: timelines could not read the upload set %s: %s", upload_id, exc)
+            return None, str(exc)
     return read
 
 
@@ -119,6 +121,11 @@ def _upload_reader(store, jobstore_module):
 def api_timelines():
     """The Timelines payload (spec 4.12): summary, projects and transect rows, newest first.
 
+    Before the jobs are read, the manual edit module's own recovery marks
+    every upload set a desktop restart stranded as interrupted (the same
+    step its upload routes take), so a stranded set never reads as
+    uploading here.
+
     Query: job, state, editor, since (YYYY-MM-DD); each filters the rows
     only, never the summary or the projects.
     """
@@ -126,12 +133,14 @@ def api_timelines():
     filters = _filters(request.args, jsm)
     registry = views.deps.registry()
     now = _now()
+    views.deps.recover_uploads(store)
     jobs, skipped = _jobs(store, jsm)
     notes = _read_registry(lambda: timelines._notes(registry))
     rows = _read_registry(lambda: timelines.project_rows(
         jobs, lambda ids: timelines._intervals_many(registry, ids, now),
         lambda opens: timelines._metashape_seconds(jsm, opens, now), views.deps.site_name, now,
-        notes=notes, upload_fn=_upload_reader(store, jsm), state_words=jsm.STATE_WORDS,
+        notes=notes, upload_fn=_upload_reader(store, jsm), live_upload_statuses=jsm.UPLOAD_LIVE_STATUSES,
+        state_words=jsm.STATE_WORDS,
         sort_key=registry.sort_key))
     projects = timelines.project_summaries(jobs, jsm.PROJECT_STATES)
     return jsonify({"generated_at": now.isoformat(timespec="seconds"),

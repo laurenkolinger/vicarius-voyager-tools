@@ -402,7 +402,7 @@
 .voyager-tools .vt-tl-table .id.code { white-space: nowrap; }
 .voyager-tools .vt-tl-table .vt-by, .voyager-tools .vt-tl-table .vt-running { display: block; margin-top: 2px; font-size: 12px; white-space: nowrap; }
 .voyager-tools .vt-tl-table .vt-running { color: var(--text, #F5EDF0); }
-.voyager-tools .vt-tl-table td.vt-num .vt-by { white-space: normal; text-align: right; }
+.voyager-tools .vt-tl-table td.vt-num .vt-by { text-align: right; }
 .voyager-tools .vt-tl-chip { display: block; }
 .voyager-tools .vt-tl-table tbody tr[data-vt-tl-row] { cursor: pointer; }
 .voyager-tools .vt-tl-open {
@@ -421,12 +421,35 @@
 .voyager-tools .vt-tl-open:focus-visible { outline: 2px solid var(--pink, #FFB3D9); outline-offset: 2px; }
 .voyager-tools .vt-tl-filters { margin-top: 12px; }
 .voyager-tools .vt-tl-table th, .voyager-tools .vt-tl-table td { padding: 6px 8px; }
-.voyager-tools .vt-tl-table td.vt-num { min-width: 60px; }
-.voyager-tools .vt-tl-table td.vt-num .vt-by { min-width: 80px; }
-/* The project line under a transect wraps after its comma, so the first
-   column stays as narrow as the Metashape project chip. */
-.voyager-tools .vt-tl-table td:first-child .vt-by { white-space: normal; }
-.voyager-tools .vt-nowrap { white-space: nowrap; }
+/* The timelines tables fit a 946 px desktop: headers may wrap onto two
+   lines, a stamp column is only as wide as its day, and the state words and
+   every figure stay whole. */
+.voyager-tools .vt-tl-table th { white-space: normal; vertical-align: bottom; }
+.voyager-tools .vt-tl-table td.vt-when { min-width: 0; }
+.voyager-tools .vt-tl-table th.vt-num { white-space: normal; }
+.voyager-tools .vt-tl-table .vt-state { white-space: nowrap; }
+/* A project's count per state may wrap between words: the chips column is
+   the one the projects table gives up at 946 px. */
+.voyager-tools .vt-tl-table .vt-tl-chip .vt-state { white-space: normal; align-items: flex-start; }
+.voyager-tools .vt-tl-table .vt-tl-chip .vt-state .chip { flex: none; margin-top: 3px; }
+.voyager-tools .vt-tl-table .vt-tl-state { display: block; margin-top: 4px; }
+.voyager-tools .vt-tl-table .vt-running.is-error { color: var(--error, #FF4D6D); white-space: normal; }
+.voyager-tools .vt-tl-table .vt-tl-opens { display: inline-block; margin-top: 2px; }
+.voyager-tools .vt-tl-table td.vt-num .vt-tl-opens { display: table; margin-left: auto; }
+/* A project's line opens its transects' rows: not sticky like the column
+   headers, and set off from the striping. */
+.voyager-tools .vt-tl-table tbody tr.vt-tl-group, .voyager-tools .vt-tl-table tbody tr.vt-tl-group:hover { background: var(--surface-light, #191926); }
+.voyager-tools .vt-tl-table tr.vt-tl-group th {
+  position: static;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border, #2a2a38);
+  border-bottom: 0;
+  background: none;
+  white-space: normal;
+}
+.voyager-tools .vt-tl-table tr.vt-tl-group .count { margin-left: 8px; font-size: 12px; }
+/* The explanatory lines of the Uploads pane and the drawer at the 12 px floor. */
+.voyager-tools #vt-uploads .vt-line.count, .voyager-tools .vt-drawer .vt-line.count { font-size: 12px; }
 /* The four filters as two definition lists side by side while the pane is
    wide (matrix window design 6.2), one column when it is narrow. */
 @container (min-width: 1060px) {
@@ -450,6 +473,7 @@
 .voyager-tools .vt-drawer-head { display: flex; align-items: center; gap: 8px; }
 .voyager-tools .vt-drawer-head h3 { margin: 0; flex: 1 1 auto; font: 700 16px/1.3 var(--font-mono, 'Space Mono', ui-monospace, monospace); }
 .voyager-tools .vt-drawer-head h3 .vt-site, .voyager-tools .vt-drawer-head h3 { overflow-wrap: anywhere; }
+.voyager-tools .vt-drawer-head h3 .vt-site { font-family: var(--font-body, 'Inter', ui-sans-serif, sans-serif); font-weight: 600; }
 .voyager-tools .vt-drawer-sub { margin: 12px 0 4px; font: 700 13px/1.3 var(--font-display, 'Syne', sans-serif); }
 .voyager-tools .vt-table-wrap.vt-keep:has(tbody:empty) { display: block; }
 .voyager-tools .vt-note-kind { font-family: var(--font-body, 'Inter', ui-sans-serif, sans-serif); font-weight: 600; }

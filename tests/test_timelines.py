@@ -19,6 +19,7 @@ from __future__ import annotations
 import copy
 import csv
 import importlib
+import json
 import os
 import shutil
 import sys
@@ -27,7 +28,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from flask import Flask
+from flask import Blueprint, Flask
 
 HERE = Path(__file__).resolve().parent
 CLONE = HERE.parent
@@ -40,6 +41,8 @@ for path in (REGISTRY_LIB_DIR, MANUAL_EDIT_CLONE):
         sys.path.insert(0, path)
 
 from manualedit import jobstore  # noqa: E402
+from manualedit import transfers  # noqa: E402
+from manualedit import views as manual_views  # noqa: E402
 from voyagertools import timelines as tl  # noqa: E402
 from voyagertools import views  # noqa: E402
 
@@ -153,12 +156,36 @@ UPLOAD_SET = {"upload_id": UPLOAD_ID, "status": "running",
                            "bytes_done": 100, "bytes_total": 400}}
 
 
-def build_rows(jobs, asked=None, notes=(), upload=None):
-    """project_rows over the fakes, sorting readable ids by their text."""
+def build_rows(jobs, asked=None, notes=(), upload=None, upload_error=""):
+    """project_rows over the fakes, sorting readable ids by their text; `upload` is what the set reader answers."""
+    reader = (lambda uid: (upload, upload_error)) if upload is not None or upload_error else None
     return tl.project_rows(jobs, fake_intervals(asked if asked is not None else []), fake_metashape,
-                           lambda code: {"MRS": ""}.get(code, "?"), NOW, notes=list(notes),
-                           upload_fn=(lambda uid: upload) if upload is not None else None,
-                           state_words=jobstore.STATE_WORDS, sort_key=lambda rid: rid)
+                           lambda code: {"MRS": ""}.get(code, "?"), NOW, notes=list(notes), upload_fn=reader,
+                           live_upload_statuses=jobstore.UPLOAD_LIVE_STATUSES, state_words=jobstore.STATE_WORDS,
+                           sort_key=lambda rid: rid)
+
+
+def stopped_job(phase, stopped_hour):
+    """The old project, stopped on the 21st at `stopped_hour` in `phase` (cancelled or failed_pulling), never uploaded.
+
+    Its MRS T1 intervals run editing from the 20th and never reach done, and
+    no later project takes the transect, so only the stop can end its total.
+    """
+    job = old_job()
+    job["phase"] = phase
+    job["phase_history"] = job["phase_history"][:3] + [{"phase": phase, "at": iso(21, stopped_hour), "by": "LO",
+                                                        "reason": ""}]
+    job["projects"][PSX_T1]["state"] = "editing"
+    job["completed_at"] = None
+    return job
+
+
+def open_editing(ids):
+    """A reader whose first id has one editing spell from the 20th at 11:00, still open at NOW."""
+    def read(asked):
+        return {rid: [interval("editing", iso(20, 11), None, (NOW - datetime.fromisoformat(iso(20, 11))).total_seconds(),
+                               open_=True)] for rid in asked}
+    return read
 
 
 class FakeError(Exception):
@@ -323,12 +350,66 @@ class ProjectRows(unittest.TestCase):
         self.assertEqual(row["editor"], "CC")
         self.assertEqual(row["last_note"], "")
 
-    def test_an_upload_set_that_cannot_be_read_leaves_the_progress_out(self):
+    def test_an_upload_set_that_cannot_be_read_says_so(self):
+        reason = f"the upload set {UPLOAD_ID} at /x/{UPLOAD_ID}.json is corrupt: items is not a list"
         rows = tl.project_rows([new_job()], fake_intervals([]), fake_metashape, lambda c: "", NOW,
-                               upload_fn=lambda uid: None, state_words={}, sort_key=lambda rid: rid)
-        self.assertEqual(rows[1]["upload"], {"upload_id": UPLOAD_ID, "status": "", "item_state": "",
-                                             "bytes_done": None, "bytes_total": None})
+                               upload_fn=lambda uid: (None, reason), live_upload_statuses=jobstore.UPLOAD_LIVE_STATUSES,
+                               state_words={}, sort_key=lambda rid: rid)
+        self.assertEqual(rows[1]["upload"], {"upload_id": UPLOAD_ID, "error": reason})
         self.assertEqual(rows[1]["state_word"], "uploading", "a state with no word shows its code")
+        blank = build_rows([new_job()], upload=None, upload_error="")
+        self.assertIsNone(blank[1]["upload"], "no reader, no upload line")
+        odd = tl.project_rows([new_job()], fake_intervals([]), fake_metashape, lambda c: "", NOW,
+                              upload_fn=lambda uid: ("not a record", ""),
+                              live_upload_statuses=jobstore.UPLOAD_LIVE_STATUSES, sort_key=lambda rid: rid)
+        self.assertEqual(odd[1]["upload"], {"upload_id": UPLOAD_ID, "error": tl.UPLOAD_UNREADABLE})
+
+    def test_a_set_that_has_ended_shows_no_progress(self):
+        for status in ("interrupted", "failed", "stopped", "done"):
+            with self.subTest(status=status):
+                ended = dict(copy.deepcopy(UPLOAD_SET), status=status)
+                row = build_rows([new_job()], upload=ended)[1]
+                self.assertIsNone(row["upload"], "a set a restart stranded never reads as uploading")
+        for status in ("queued", "running"):
+            with self.subTest(status=status):
+                self.assertEqual(build_rows([new_job()], upload=dict(UPLOAD_SET, status=status))[1]["upload"]["status"],
+                                 status)
+
+    def test_a_cancelled_project_s_total_stops_at_the_cancel(self):
+        job = stopped_job("cancelled", 15)
+        rows = tl.project_rows([job], open_editing(T1_IDS), fake_metashape, lambda c: "", NOW,
+                               sort_key=lambda rid: rid)
+        self.assertEqual(rows[0]["total_s"], 28 * 3600, "from the pull on the 20th at 11:00 to the cancel on the 21st")
+        later = tl.project_rows([job], open_editing(T1_IDS), fake_metashape, lambda c: "", NOW + timedelta(days=3),
+                                sort_key=lambda rid: rid)
+        self.assertEqual(later[0]["total_s"], 28 * 3600, "a later reading does not grow the total")
+
+    def test_a_failed_pull_s_total_stops_at_the_failure(self):
+        rows = tl.project_rows([stopped_job("failed_pulling", 13)], open_editing(T1_IDS), fake_metashape,
+                               lambda c: "", NOW, sort_key=lambda rid: rid)
+        self.assertEqual(rows[0]["total_s"], 26 * 3600)
+
+    def test_stopped_at(self):
+        self.assertEqual(tl.stopped_at(stopped_job("cancelled", 15)), datetime.fromisoformat(iso(21, 15)))
+        self.assertEqual(tl.stopped_at(old_job()), datetime.fromisoformat(iso(23, 10)), "a complete job stops too")
+        self.assertIsNone(tl.stopped_at(new_job()), "a job still editing runs on")
+        twice = stopped_job("failed_pulling", 13)
+        twice["phase_history"].insert(2, {"phase": "failed_pulling", "at": iso(20, 10), "by": "LO", "reason": ""})
+        self.assertEqual(tl.stopped_at(twice), datetime.fromisoformat(iso(21, 13)), "the newest failure")
+        broken = stopped_job("cancelled", 15)
+        broken["phase_history"] = "junk"
+        self.assertIsNone(tl.stopped_at(broken))
+        broken["phase_history"] = [{"phase": "cancelled", "at": "not a time"}, None]
+        self.assertIsNone(tl.stopped_at(broken))
+
+    def test_the_earliest_of_the_stop_the_next_project_and_now_ends_the_total(self):
+        job = stopped_job("cancelled", 15)
+        later = dict(new_job(), job_id="ME-20260921-100000-LO", created_at=iso(21, 10),
+                     rows=rows_for(T1_IDS, PSX_T1, "MRS", "T1"), projects={PSX_T1: project("editing")})
+        rows = tl.project_rows([later, job], open_editing(T1_IDS), fake_metashape, lambda c: "", NOW,
+                               sort_key=lambda rid: rid)
+        by_job = {r["job_id"]: r for r in rows}
+        self.assertEqual(by_job[JOB_OLD]["total_s"], 23 * 3600, "the next project came before the cancel")
 
     def test_progress_of_another_folder_is_not_this_transect(self):
         other = copy.deepcopy(UPLOAD_SET)
@@ -476,10 +557,20 @@ class Routes(unittest.TestCase):
         views.deps.job_store = lambda: self.store
         views.deps.now_iso = lambda: NOW.isoformat(timespec="seconds")
         views.deps.site_name = lambda code: {"MRS": ""}.get(code, "")
+        self.app = self.make_app()
+        self.client = self.app.test_client()
+
+    @staticmethod
+    def make_app(mount_manual_edit=False):
+        """A bare app with the panel's blueprint, and a stand-in blueprint under the manual edit module's name on request."""
         app = Flask(__name__)
         app.secret_key = "test"
         app.register_blueprint(views.voyager_tools_bp)
-        self.client = app.test_client()
+        if mount_manual_edit:
+            app.register_blueprint(Blueprint(views.MANUAL_EDIT_BLUEPRINT, __name__))
+            app.config[manual_views.DEPS_KEY] = transfers.Deps(
+                *([None] * 10), upload_runner=transfers.UploadRunner())
+        return app
 
     def tearDown(self):
         for key, value in self._saved.items():
@@ -619,6 +710,65 @@ class Routes(unittest.TestCase):
                 self.assertEqual(r.status_code, 503)
                 self.assertEqual(r.get_json()["error"], "The manual edit module is not mounted here.")
                 self.assertTrue(r.get_json()["not_mounted"])
+
+    def uploading_set(self):
+        """Put LBH T3 in a real upload set left running on disk, as a desktop restart strands it; returns its id."""
+        path = self.store.job_path(JOB_NEW)
+        record = self.store.load_job(JOB_NEW)
+        record["projects"][PSX_T3].update({"state": "upload", "upload_id": None})
+        path.write_text(json.dumps(record), encoding="utf-8")
+        upload = self.store.create_upload_set([{"job_id": JOB_NEW, "psx": PSX_T3}], "LO", "admin", True,
+                                              transfers.upload_settings(self.store))
+        self.store.set_upload_status(upload["upload_id"], "running")
+        return upload["upload_id"]
+
+    def test_the_recovery_runs_before_the_jobs_are_read(self):
+        self.seed()
+        self.unlock()
+        seen = []
+
+        def recover(store):
+            seen.append(store)
+            record = store.load_job(JOB_NEW)
+            record["projects"][PSX_T3].update({"state": "upload", "upload_id": None})
+            store.job_path(JOB_NEW).write_text(json.dumps(record), encoding="utf-8")
+        views.deps.recover_uploads = recover
+        rows = {r["psx"]: r for r in self.client.get("/voyager-tools/api/timelines").get_json()["rows"]}
+        self.assertEqual(seen, [self.store])
+        self.assertEqual((rows[PSX_T3]["state"], rows[PSX_T3]["upload"]), ("upload", None))
+
+    def test_a_stranded_running_set_reads_as_interrupted_where_manual_edit_is_mounted(self):
+        self.seed()
+        upload_id = self.uploading_set()
+        client = self.make_app(mount_manual_edit=True).test_client()
+        with client.session_transaction() as sess:
+            sess["admin_unlocked"] = True
+        rows = {r["psx"]: r for r in client.get("/voyager-tools/api/timelines").get_json()["rows"]}
+        self.assertEqual(self.store.load_upload_set(upload_id)["status"], "interrupted")
+        self.assertEqual((rows[PSX_T3]["state"], rows[PSX_T3]["upload"]), ("upload", None),
+                         "never shown as uploading")
+        summary = client.get("/voyager-tools/api/timelines").get_json()["summary"]
+        self.assertEqual(summary["by_state"]["uploading"], 0)
+
+    def test_a_host_without_manual_edit_leaves_the_sets_alone(self):
+        self.seed()
+        upload_id = self.uploading_set()
+        self.unlock()
+        row = {r["psx"]: r for r in self.client.get("/voyager-tools/api/timelines").get_json()["rows"]}[PSX_T3]
+        self.assertEqual(self.store.load_upload_set(upload_id)["status"], "running",
+                         "another process may be running it")
+        self.assertEqual((row["upload"]["upload_id"], row["upload"]["status"]), (upload_id, "running"))
+
+    def test_a_missing_upload_set_is_named_on_the_row_and_logged(self):
+        self.seed()
+        self.unlock()
+        with self.assertLogs(self.app.logger, "WARNING") as logged:
+            rows = {r["psx"]: r for r in self.client.get("/voyager-tools/api/timelines").get_json()["rows"]}
+        upload = rows[PSX_T3]["upload"]
+        self.assertEqual(upload["upload_id"], UPLOAD_ID)
+        self.assertIn(UPLOAD_ID, upload["error"])
+        self.assertIn("no upload set", upload["error"])
+        self.assertTrue(any(UPLOAD_ID in line for line in logged.output))
 
     def test_an_unreadable_events_file_is_a_500_line(self):
         self.seed()

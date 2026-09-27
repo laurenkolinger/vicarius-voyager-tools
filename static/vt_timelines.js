@@ -12,12 +12,15 @@
  * table (pulled, time in editing, in Metashape, in admin review, waiting for
  * upload, uploaded, total, and what is running now); Copy as CSV of the rows
  * shown; and a drawer (role dialog, Escape closes it and returns focus) with
- * the registry status spells of every readable id and every note of that
- * transect, from GET /voyager-tools/api/timelines/detail.
+ * the status history of every atlas row and every note of that transect,
+ * from GET /voyager-tools/api/timelines/detail. The Transects table groups
+ * its rows under one line per project (its id, who started it, its phase),
+ * so each row carries only the transect, its state and its times.
  *
  * The pure helpers (filterRows, rowsToCsv, formatDuration, progressLine,
- * summaryLine, runningLine, pullLine, stateRole, cleanFilters) are exported
- * to node through module.exports for tests/test_manual_edit_pins.py.
+ * summaryLine, runningLine, pullLine, stateRole, cleanFilters, phaseWords,
+ * actorWords) are exported to node through module.exports for
+ * tests/test_manual_edit_pins.py.
  */
 (function () {
   "use strict";
@@ -59,8 +62,9 @@
   var NOTE_WORDS = { editor_explanation: "Editor's explanation", check_note: "Check note", admin_review: "Admin review",
                      return_instructions: "Instructions to the editor", restart: "Start over", rescale: "Rescale" };
   var DECISION_WORDS = { upload: "marked for upload", "return": "sent back", restart: "started over" };
-  var PHASE_CANCELLED = "cancelled";
   var PHASE_WORDS = { draft: "draft", pulling: "pulling", editing: "editing", done: "complete", cancelled: "cancelled" };
+  var FAILED_PREFIX = "failed_";  // manualedit.jobstore.FAILED_PREFIX: failed_pulling is a pull that failed
+  var ACTOR_SEPARATOR = ":";      // a registry actor is <source>:<initials>, for example manual_edit:LO
   var CSV_COLUMNS = [
     { key: "job_id", label: "Project" }, { key: "psx", label: "Metashape project" }, { key: "site", label: "Site" },
     { key: "site_name", label: "Site name" }, { key: "transect", label: "Transect" }, { key: "editor", label: "Editor" },
@@ -71,9 +75,11 @@
     { key: "total_s", label: "Total (s)" }, { key: "last_note", label: "Last note" }];
   var LINE_NOT_MOUNTED = "The manual edit module is not mounted here.";
   var LINE_NO_ROWS = "No transect matches these filters.";
+  var TRANSECT_COLUMNS = 7;  // the Transects table's columns, for the project lines and the empty line
   var LINE_NO_PROJECTS = "No manual edit project recorded yet.";
   var LINE_BAD_DAY = "Type the first day as YYYY-MM-DD, for example 2026-09-27.";
-  var TIP_OPEN_ROW = "Show the registry status spells and the notes of this transect.";
+  var TIP_OPEN_ROW = "Show the status history and the notes of this transect.";
+  var TIP_UNKNOWN_OPENS = "VICARIUS found {n} with no recorded close, so the Metashape time leaves them out.";
 
   /* ---- pure helpers (exported to node) --------------------------------------- */
 
@@ -148,9 +154,13 @@
     return Math.min(PERCENT, Math.floor(done / total * PERCENT));
   }
 
-  // runningLine(row): what is running for a transect now: its upload item, or an open checks window.
+  // runningLine(row): what is running for a transect now: its upload item, or an open checks window;
+  // an upload set that cannot be read says so, with the reason.
   function runningLine(row) {
     var r = row || {};
+    if (r.upload && r.upload.error) {
+      return "Upload set " + r.upload.upload_id + " could not be read: " + String(r.upload.error).replace(/\.$/, "");
+    }
     if (r.upload) {
       var words = ITEM_WORDS[r.upload.item_state || ITEM_WAITING] || String(r.upload.item_state);
       var pct = percentOf(r.upload.bytes_done, r.upload.bytes_total);
@@ -168,6 +178,22 @@
   // stateRole(state): a transect state on the matrix design's roles.
   function stateRole(state) { return STATE_ROLES[state] || "role-empty"; }
 
+  // phaseWords(phase): a project phase in words; failed_pulling reads "failed while pulling".
+  function phaseWords(phase) {
+    var text = String(phase || "");
+    if (text.indexOf(FAILED_PREFIX) === 0) return "failed while " + text.slice(FAILED_PREFIX.length).replace(/_/g, " ");
+    return PHASE_WORDS[text] || text;
+  }
+
+  // actorWords(actor): a registry actor as initials with its source in words,
+  // "manual_edit:LO" -> "LO, manual edit"; an actor with no source stays as it is.
+  function actorWords(actor) {
+    var text = String(actor || "");
+    var at = text.lastIndexOf(ACTOR_SEPARATOR);
+    if (at <= 0 || at === text.length - 1) return text;
+    return text.slice(at + 1) + ", " + text.slice(0, at).replace(/_/g, " ");
+  }
+
   // cleanFilters(stored): the remembered filters, each dropped when it does not parse.
   function cleanFilters(stored) {
     var f = stored && typeof stored === "object" ? stored : {};
@@ -180,7 +206,7 @@
 
   var helpers = { filterRows: filterRows, rowsToCsv: rowsToCsv, formatDuration: formatDuration, progressLine: progressLine,
                   summaryLine: summaryLine, runningLine: runningLine, pullLine: pullLine, stateRole: stateRole,
-                  cleanFilters: cleanFilters, CSV_COLUMNS: CSV_COLUMNS };
+                  cleanFilters: cleanFilters, phaseWords: phaseWords, actorWords: actorWords, CSV_COLUMNS: CSV_COLUMNS };
   if (typeof module === "object" && module && module.exports) module.exports = helpers;
   if (typeof window === "undefined") return;
 
@@ -225,8 +251,7 @@
       return '<span class="vt-tl-chip">' + stateHtml(stateRole(state), byState[state] + " " + (stateWords[state] || state)) + "</span>";
     }).join("");
     var pull = pullLine(p.pull);
-    var phase = PHASE_WORDS[p.phase] || String(p.phase || "");
-    return "<tr><td>" + chip(p.job_id) + '<span class="count vt-by">by ' + esc(p.created_by) + ", " + esc(phase) + "</span>" +
+    return "<tr><td>" + chip(p.job_id) + '<span class="count vt-by">by ' + esc(p.created_by) + ", " + esc(phaseWords(p.phase)) + "</span>" +
       (pull ? '<span class="count vt-running">' + esc(pull) + "</span>" : "") + "</td>" +
       '<td class="vt-mono vt-when">' + whenHtml(p.created_at) + '</td><td class="vt-mono vt-when">' + whenHtml(p.finished_at) +
       '</td><td class="vt-mono vt-when">' + whenHtml(p.completed_at) + '</td><td class="vt-mono">' + esc(progressLine(p)) +
@@ -238,22 +263,44 @@
     return '<td class="vt-mono vt-num">' + (words ? esc(words) : '<span class="count">none</span>') + "</td>";
   }
 
+  // unknownOpensHtml(n): "+5 open" as a count chip, the full sentence in its tooltip.
+  function unknownOpensHtml(n) {
+    if (!(n > 0)) return "";
+    var tip = TIP_UNKNOWN_OPENS.replace("{n}", plural(n, "open"));
+    return '<span class="id code vt-tl-opens" tabindex="0" title="' + esc(tip) + '">+' + esc(n) + " open</span>";
+  }
+
+  // totalCell(row): the total, with the upload's day and time under it once uploaded.
+  function totalCell(row) {
+    var words = formatDuration(row.total_s);
+    var uploaded = row.uploaded_at ? stampWords(row.uploaded_at) : "";
+    var split = uploaded.indexOf(" ");
+    return '<td class="vt-mono vt-num"' + (uploaded ? ' title="' + esc("Uploaded " + uploaded + ".") + '"' : "") + ">" +
+      (words ? esc(words) : '<span class="count">none</span>') +
+      (uploaded ? '<span class="count vt-by">' + esc(uploaded.slice(0, split)) + '</span><span class="count vt-by">' +
+        esc(uploaded.slice(split + 1)) + "</span>" : "") + "</td>";
+  }
+
+  // groupRowHtml(row, project): the line that opens a project's rows: its id,
+  // who started it and its phase, from the project's summary when there is one.
+  function groupRowHtml(row, project) {
+    var p = project || {};
+    return '<tr class="vt-tl-group"><th scope="colgroup" colspan="' + TRANSECT_COLUMNS + '">' + chip(row.job_id) +
+      '<span class="count">started by ' + esc(p.created_by || row.editor) + ", " + esc(phaseWords(p.phase || row.phase)) +
+      "</span></th></tr>";
+  }
+
   function transectRowHtml(row, index, stateWords) {
     var running = runningLine(row);
+    var failed = !!(row.upload && row.upload.error);
     var round = row.round > 0 ? '<span class="count vt-by">edit round ' + esc(row.round + 1) + "</span>" : "";
-    var unknown = row.unknown_opens > 0 ? '<span class="count vt-by">and ' + esc(plural(row.unknown_opens, "open")) +
-      " with no recorded close</span>" : "";
-    var metashape = formatDuration(row.metashape_s);
     return '<tr data-vt-tl-row="' + index + '"><td><button type="button" class="vt-tl-open" data-vt-tl-open="' + index +
-      '" title="' + esc(TIP_OPEN_ROW) + '">' + siteHtml(row) + " " + esc(row.transect) + "</button>" + chip(row.psx) + round +
-      '<span class="count vt-by"><span class="vt-nowrap">' + esc(row.job_id) + "</span>, editor " + esc(row.editor) + "</span></td>" +
-      "<td>" + stateHtml(stateRole(row.state), stateWords[row.state] || row.state) +
-      (row.phase === PHASE_CANCELLED ? '<span class="count vt-by">project cancelled</span>' : "") +
-      (running ? '<span class="count vt-running">' + esc(running) + "</span>" : "") + "</td>" +
+      '" title="' + esc(TIP_OPEN_ROW) + '">' + siteHtml(row) + " " + esc(row.transect) + "</button>" + chip(row.psx) +
+      '<span class="vt-tl-state">' + stateHtml(stateRole(row.state), stateWords[row.state] || row.state) + "</span>" + round +
+      (running ? '<span class="count vt-running' + (failed ? " is-error" : "") + '">' + esc(running) + "</span>" : "") + "</td>" +
       '<td class="vt-mono vt-when">' + whenHtml(row.pulled_at) + "</td>" + durationCell(row.editing_s) +
-      '<td class="vt-mono vt-num">' + esc(metashape) + unknown + "</td>" + durationCell(row.review_s) +
-      durationCell(row.upload_wait_s) + '<td class="vt-mono vt-when">' + whenHtml(row.uploaded_at) + "</td>" +
-      durationCell(row.total_s) + "</tr>";
+      '<td class="vt-mono vt-num">' + esc(formatDuration(row.metashape_s)) + unknownOpensHtml(row.unknown_opens) + "</td>" +
+      durationCell(row.review_s) + durationCell(row.upload_wait_s) + totalCell(row) + "</tr>";
   }
 
   function intervalRowsHtml(spells) {
@@ -263,8 +310,8 @@
         (s.clock_anomaly ? '<span class="count vt-by">the clock ran backwards here</span>' : "") + "</td>" +
         '<td class="vt-mono vt-when">' + whenHtml(s.start) + '</td><td class="vt-mono vt-when">' +
         (s.open ? '<span class="count">now</span>' : whenHtml(s.end)) + "</td>" +
-        '<td class="vt-mono vt-num">' + esc(formatDuration(s.seconds)) + '</td><td class="vt-mono">' + esc(s.actor || "") +
-        '</td><td class="vt-mono">' + esc(s.open ? "" : (s.end_actor || "")) + "</td></tr>";
+        '<td class="vt-mono vt-num">' + esc(formatDuration(s.seconds)) + "</td><td>" + esc(actorWords(s.actor)) +
+        "</td><td>" + esc(s.open ? "" : actorWords(s.end_actor)) + "</td></tr>";
     }).join("");
   }
 
@@ -295,12 +342,12 @@
   function drawerBodyHtml(data) {
     var spells = spellGroups(data.intervals).map(function (group) {
       return '<h4 class="vt-drawer-sub">' + group.ids.map(chip).join(" ") + "</h4>" +
-        '<div class="vt-table-wrap vt-keep"><table class="vt-table"><thead><tr><th scope="col">Status</th><th scope="col">From</th>' +
+        '<div class="vt-table-wrap vt-keep"><table class="vt-table vt-tl-table"><thead><tr><th scope="col">Status</th><th scope="col">From</th>' +
         '<th scope="col">To</th><th scope="col" class="vt-num">Time</th><th scope="col">Entered by</th><th scope="col">Left by</th>' +
         "</tr></thead><tbody>" + intervalRowsHtml(group.spells) + "</tbody></table></div>";
     }).join("");
     var notes = data.notes || [];
-    return '<h4 class="vt-drawer-sub">Registry status spells</h4>' + spells +
+    return '<h4 class="vt-drawer-sub">Status history</h4>' + spells +
       '<h4 class="vt-drawer-sub">Notes</h4>' +
       (notes.length ? '<ul class="rows vt-striped">' + notes.map(noteRowHtml).join("") + "</ul>"
         : '<p class="count">No note recorded for this transect in this project.</p>');
@@ -357,9 +404,13 @@
 
     function renderRows() {
       var words = st.data.state_words || {};
+      var projects = {};
+      (st.data.projects || []).forEach(function (p) { projects[p.job_id] = p; });
       st.shown = filterRows(st.data.rows, st.filters);
-      el.rows.innerHTML = st.shown.map(function (r, i) { return transectRowHtml(r, i, words); }).join("") ||
-        '<tr><td colspan="9" class="count">' + esc(LINE_NO_ROWS) + "</td></tr>";
+      el.rows.innerHTML = st.shown.map(function (r, i) {
+        var opens = i === 0 || st.shown[i - 1].job_id !== r.job_id;
+        return (opens ? groupRowHtml(r, projects[r.job_id]) : "") + transectRowHtml(r, i, words);
+      }).join("") || '<tr><td colspan="' + TRANSECT_COLUMNS + '" class="count">' + esc(LINE_NO_ROWS) + "</td></tr>";
       var all = (st.data.rows || []).length;
       el.count.textContent = st.shown.length === all ? plural(all, "transect") : st.shown.length + " of " + all + " transects";
       el.csv.disabled = st.shown.length === 0;
@@ -421,9 +472,11 @@
       st.opener = opener;
       st.detailFor = row.job_id + "|" + row.psx;
       var forKey = st.detailFor;
-      el.drawerTitle.innerHTML = (row.site_name ? esc(row.site_name) + " " : "") + chip(row.site) + " " + esc(row.transect) + " " + chip(row.psx);
-      el.drawerSub.textContent = "Project " + row.job_id + ", editor " + row.editor + ", readable ids " + (row.readable_ids || []).join(", ") + ".";
-      el.drawerBody.innerHTML = '<p class="count">Reading the status spells and notes.</p>';
+      el.drawerTitle.innerHTML = (row.site_name ? '<span class="vt-site">' + esc(row.site_name) + "</span> " : "") + chip(row.site) +
+        " " + esc(row.transect) + " " + chip(row.psx);
+      el.drawerSub.textContent = "Project " + row.job_id + ", editor " + row.editor + ". Atlas rows " +
+        (row.readable_ids || []).join(", ") + ".";
+      el.drawerBody.innerHTML = '<p class="count">Reading the status history and notes.</p>';
       el.drawer.hidden = false;
       el.drawer.querySelector('[data-vt="tl-drawer-close"]').focus();
       var query = "?job=" + encodeURIComponent(row.job_id) + "&psx=" + encodeURIComponent(row.psx);

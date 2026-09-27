@@ -28,7 +28,7 @@ The manual edit module's list of transects, possibly from several manual edit pr
 _Avoid_: batch (a batch is a driver's group of Voyager turns), upload job
 
 **Timeline**:
-How long one transect of one manual edit project spent at each step, read in the Timelines pane: pulled to the edit bench, editing, open in Metashape, in admin review, waiting for upload, uploaded. The registry status times come from the status changes in `events.csv` (program A's `state_intervals`) inside the project's window, from its creation to the creation of the next project holding the same transect; the Metashape time comes from the transect's open and close events; nothing is a stored counter.
+How long one transect of one manual edit project spent at each step, read in the Timelines pane: pulled to the edit bench, editing, open in Metashape, in admin review, waiting for upload, uploaded. The registry status times come from the status changes in `events.csv` (the registry library's `state_intervals`, the time each status lasted) inside the project's window, from its creation to the creation of the next project holding the same transect; the Metashape time comes from the transect's open and close events; nothing is a stored counter.
 _Avoid_: history (the settings history is another thing), log
 
 **Drift**:

@@ -292,12 +292,17 @@ class TimelinesPane(PanesCase):
         check(results, 'pull_line', vt('tl-projects').textContent.indexOf('Pulling to the edit bench, 25 percent') !== -1);
         check(results, 'progress', vt('tl-projects').textContent.indexOf('1 of 1 uploaded') !== -1);
         check(results, 'running', vt('tl-rows').textContent.indexOf('Copying, 25 percent') !== -1);
-        check(results, 'unknown_opens', vt('tl-rows').textContent.indexOf('and 2 opens with no recorded close') !== -1);
+        var opensChip = vt('tl-rows').querySelector('.vt-tl-opens');
+        check(results, 'unknown_opens', opensChip && opensChip.textContent === '+2 open' && opensChip.title.indexOf('2 opens with no recorded close') !== -1, opensChip && opensChip.title);
+        var groups = qa('[data-vt="tl-rows"] tr.vt-tl-group').map(function (g) { return g.textContent; });
+        check(results, 'project_lines', groups.length === 2 && groups[0].indexOf('ME-20260926-100000-LO') === 0 && groups[0].indexOf('started by LO, editing') !== -1 && groups[1].indexOf('started by CC, complete') !== -1, JSON.stringify(groups));
+        check(results, 'uploaded_under_total', vt('tl-rows').textContent.indexOf('2026-09-2212:00 AST') !== -1);
         check(results, 'hostile_as_text', !vt('tl-rows').querySelector('img') && vt('tl-rows').textContent.indexOf('<img src=x') !== -1);
         var states = qa('[data-vt="tl-state"] option').map(function (o) { return o.value; });
         check(results, 'states_present', JSON.stringify(states) === JSON.stringify(['', 'review', 'uploading', 'done']), JSON.stringify(states));
         var select = vt('tl-state'); select.value = 'review'; select.dispatchEvent(new Event('change', {bubbles: true}));
         check(results, 'filtered', bodyRows().length === 1 && vt('tl-count').textContent === '1 of 3 transects', vt('tl-count').textContent);
+        check(results, 'one_project_line', qa('[data-vt="tl-rows"] tr.vt-tl-group').length === 1);
         check(results, 'remembered', JSON.parse(localStorage.getItem('vt.timelines.filters')).state === 'review');
         check(results, 'clear_shown', vt('tl-clear').hidden === false);
         vt('tl-clear').click();
@@ -313,6 +318,8 @@ class TimelinesPane(PanesCase):
         check(results, 'detail_query', detail && detail.url.indexOf('job=ME-20260926-100000-LO&psx=MRS_T2_2023_2024.psx') !== -1, detail && detail.url);
         check(results, 'note_as_text', !vt('tl-drawer-body').querySelector('b') && vt('tl-drawer-body').textContent.indexOf('<b>Rescale</b>') !== -1);
         check(results, 'note_words', vt('tl-drawer-body').textContent.indexOf('Admin review, sent back') !== -1);
+        check(results, 'actor_words', vt('tl-drawer-body').textContent.indexOf('LO, manual edit') !== -1 && vt('tl-drawer-body').textContent.indexOf('manual_edit:LO') === -1);
+        check(results, 'drawer_sub', vt('tl-drawer-sub').textContent === 'Project ME-20260926-100000-LO, editor LO. Atlas rows MRS_T2_2023ann.', vt('tl-drawer-sub').textContent);
         check(results, 'focus_close', document.activeElement === q('[data-vt="tl-drawer-close"]'));
         vt('tl-drawer').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
         check(results, 'drawer_closed', vt('tl-drawer').hidden === true);

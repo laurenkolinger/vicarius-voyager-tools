@@ -43,7 +43,7 @@
         </div>
         <div class="vt-list-head">
           <h3 class="vt-list-title" id="vt-uploads-recent-h">Running and recent uploads</h3>
-          <button type="button" class="tip" aria-label="About recent uploads" title="Every upload set started in the last 7 days, newest first, from this panel or from Finish project. Watch reopens its progress window."><span>i</span></button>
+          <button type="button" class="tip" aria-label="About recent uploads" title="VICARIUS lists every upload set started in the last 7 days, newest first, whether from the Atlas control panel or from Finish project. Watch reopens its progress window."><span>i</span></button>
         </div>
         <ul class="rows vt-striped" data-vt="uploads-recent" aria-labelledby="vt-uploads-recent-h"></ul>
       </section>
@@ -52,7 +52,7 @@
       <section class="vt-pane" id="vt-timelines" role="tabpanel" data-vt-pane="timelines" aria-labelledby="vt-timelines-h" hidden>
         <div class="pane-head">
           <h2 id="vt-timelines-h">Timelines</h2>
-          <button type="button" class="tip" aria-label="About timelines" title="A timeline is how long each transect of a manual edit project spent at each step: pulled to the edit bench, editing, open in Metashape, in admin review, waiting for upload, uploaded. VICARIUS reads the times from the registry's status changes and the project's own record, never from a stored counter."><span>i</span></button>
+          <button type="button" class="tip" aria-label="About timelines" title="A timeline is how long each transect of a manual edit project spent at each step: pulled to the edit bench, editing, open in Metashape, in admin review, waiting for upload, uploaded. VICARIUS reads the times from the registry's status changes and the project's own record."><span>i</span></button>
         </div>
         <p class="vt-summary" data-vt="tl-summary"></p>
         <div class="vt-list-head">
@@ -94,17 +94,17 @@
         </section>
         <div class="vt-list-head">
           <h3 class="vt-list-title" id="vt-tl-rows-h">Transects</h3>
-          <button type="button" class="tip" aria-label="About the transect times" title="Editing, Review and Upload wait sum the spells in each registry status; Metashape counts the time between each open and its close. Total runs from the pull to the upload, or to now while the transect is on the edit bench."><span>i</span></button>
+          <button type="button" class="tip" aria-label="About the transect times" title="VICARIUS adds up the time the atlas status spent in editing, admin review and marked for upload, and the time from each open in Metashape to its close. Total runs from the pull to the upload, whose day and time show under it, and stops early when the project is cancelled or fails or a later project takes the transect."><span>i</span></button>
           <span class="count" data-vt="tl-count"></span>
         </div>
         <div class="vt-table-wrap">
           <table class="vt-table vt-tl-table" aria-labelledby="vt-tl-rows-h">
-            <thead><tr><th scope="col">Transect</th><th scope="col">State</th><th scope="col">Pulled</th><th scope="col" class="vt-num">Editing</th><th scope="col" class="vt-num">Metashape</th><th scope="col" class="vt-num">Review</th><th scope="col" class="vt-num">Upload wait</th><th scope="col">Uploaded</th><th scope="col" class="vt-num">Total</th></tr></thead>
+            <thead><tr><th scope="col">Transect</th><th scope="col">Pulled</th><th scope="col" class="vt-num">Editing</th><th scope="col" class="vt-num">Metashape</th><th scope="col" class="vt-num">Review</th><th scope="col" class="vt-num">Upload wait</th><th scope="col" class="vt-num">Total</th></tr></thead>
             <tbody data-vt="tl-rows"></tbody>
           </table>
         </div>
         <div class="actions">
-          <button type="button" class="btn" data-vt="tl-csv" disabled title="Copy the transects listed, every cell quoted, for a spreadsheet. A cell that would start a formula gets a leading apostrophe.">Copy as CSV</button>
+          <button type="button" class="btn" data-vt="tl-csv" disabled title="Copy the transects listed, every cell quoted, for a spreadsheet. VICARIUS puts a leading apostrophe on a cell that would start a formula.">Copy as CSV</button>
           <button type="button" class="btn" data-vt="tl-refresh">Refresh</button>
         </div>
         <p class="result" data-vt="tl-result" role="status"></p>

@@ -41,10 +41,16 @@ STATE_DONE = "done"
 STATE_UPLOADING = "uploading"
 PHASE_PULLING = "pulling"
 PHASE_EDITING = "editing"
+# The job phases after which a transect's clock stops (jobstore.TERMINAL_PHASES
+# and jobstore.FAILED_PREFIX): a cancelled, complete or failed project no
+# longer holds its transects' time.
+STOPPED_PHASES = frozenset({"done", "cancelled"})
+FAILED_PHASE_PREFIX = "failed_"
 OPEN_EVENT = "open"
 COMPLETED_WINDOW_DAYS = 30
 DAY_CHARS = 10                        # YYYY-MM-DD at the head of an ISO stamp
 HALF_SECOND = 0.5
+UPLOAD_UNREADABLE = "the upload set record could not be read"
 SUMMED_STATUSES = {STATUS_EDITING: "editing_s", STATUS_REVIEW: "review_s", STATUS_UPLOAD: "upload_wait_s"}
 
 
@@ -220,6 +226,35 @@ def _last_note(notes: Iterable[Mapping], job_id: str, psx: str) -> str:
     return _text(mine[-1].get("text")) if mine else ""
 
 
+def stopped_at(job: Mapping) -> datetime | None:
+    """The moment a job stopped: when it entered its current phase, if that phase is done, cancelled or failed.
+
+    Returns:
+        The time of the newest phase_history entry of the job's current
+        phase when that phase is done, cancelled or failed_<step>; None
+        while the job runs, or when its history has no readable entry.
+
+    Example:
+        a job in phase cancelled whose history says cancelled at
+        2026-09-22T09:00:00-04:00 -> 2026-09-22 09:00:00-04:00
+    """
+    phase = _text(job.get("phase"))
+    if phase not in STOPPED_PHASES and not phase.startswith(FAILED_PHASE_PREFIX):
+        return None
+    history = job.get("phase_history") if isinstance(job.get("phase_history"), list) else []
+    stamps = [parse_time(e.get("at")) for e in history if isinstance(e, Mapping) and e.get("phase") == phase]
+    stamps = [stamp for stamp in stamps if stamp is not None]
+    return stamps[-1] if stamps else None
+
+
+def _total_end(figures: Mapping, stopped: datetime | None, until: datetime | None, now: datetime) -> datetime:
+    """Where a transect's total stops: its upload, else the earliest of the job's stop, the next project and now."""
+    uploaded = parse_time(figures.get("uploaded_at"))
+    if uploaded is not None:
+        return uploaded
+    return min(stamp for stamp in (stopped, until, now) if stamp is not None)
+
+
 def upload_progress(upload_id: str, record: Mapping | None, job_id: str, psx: str, folder: str) -> dict:
     """What an upload set says of one transect now.
 
@@ -239,22 +274,43 @@ def upload_progress(upload_id: str, record: Mapping | None, job_id: str, psx: st
             "bytes_total": progress.get("folder_bytes_total") if here else item_bytes}
 
 
+def _upload_of(state: str, project: Mapping, job_id: str, transect: Mapping, upload_fn,
+               live: frozenset) -> dict | None:
+    """The upload a transect's row shows: its progress while its set is live, or why the set cannot be read.
+
+    Parameters:
+        state: the transect's state; only an uploading transect shows one.
+        upload_fn: upload id -> (the set record, "") or (None, the reason it
+            cannot be read); None shows no upload.
+        live: the set statuses that mean it is still queued or running.
+
+    Returns:
+        upload_progress's dict, {upload_id, error} for an unreadable set, or
+        None (not uploading, no reader, or a set that has ended).
+    """
+    upload_id = _text(project.get("upload_id"))
+    if state != STATE_UPLOADING or not upload_id or upload_fn is None:
+        return None
+    record, error = upload_fn(upload_id)
+    if error or not isinstance(record, Mapping):
+        return {"upload_id": upload_id, "error": _text(error) or UPLOAD_UNREADABLE}
+    if _text(record.get("status")) not in live:
+        return None
+    return upload_progress(upload_id, record, job_id, transect["psx"], transect["processing_folder"])
+
+
 def _row(job: Mapping, transect: Mapping, project: Mapping, figures: Mapping, metashape: Mapping, now: datetime,
-         until: datetime | None, notes: list, upload_fn, state_words: Mapping) -> dict:
+         until: datetime | None, notes: list, upload: dict | None, state_words: Mapping) -> dict:
     """One transect row of the payload (spec 4.12 plus the job-record times).
 
-    The total runs from the pull to the upload, else to the next project
-    holding the transect (`until`), else to now.
+    The total runs from the pull to the upload; with no upload it stops at
+    the earliest of the moment the job was cancelled, completed or failed,
+    the next project holding the transect (`until`), and now.
     """
     job_id = _text(job.get("job_id"))
     state = _text(project.get("state")) or STATE_TODO
     pulled = parse_time(figures["pulled_at"])
-    ended = parse_time(figures["uploaded_at"]) or (min(until, now) if until is not None else now)
-    upload_id = _text(project.get("upload_id"))
-    upload = None
-    if state == STATE_UPLOADING and upload_id:
-        record = upload_fn(upload_id) if upload_fn is not None else None
-        upload = upload_progress(upload_id, record, job_id, transect["psx"], transect["processing_folder"])
+    ended = _total_end(figures, stopped_at(job), until, now)
     return {
         "job_id": job_id, "psx": transect["psx"], "processing_folder": transect["processing_folder"],
         "readable_ids": list(transect["readable_ids"]), "site": transect["site"], "site_name": transect["site_name"],
@@ -272,8 +328,8 @@ def _row(job: Mapping, transect: Mapping, project: Mapping, figures: Mapping, me
 
 
 def project_rows(jobs: list[Mapping], intervals_fn: Callable, metashape_fn: Callable, site_name_fn: Callable,
-                 now: datetime, *, notes=(), upload_fn: Callable | None = None, state_words: Mapping | None = None,
-                 sort_key: Callable = str) -> list[dict]:
+                 now: datetime, *, notes=(), upload_fn: Callable | None = None, live_upload_statuses=frozenset(),
+                 state_words: Mapping | None = None, sort_key: Callable = str) -> list[dict]:
     """One row per transect of every job, jobs in the order given (newest first), transects in row order.
 
     Parameters:
@@ -283,11 +339,15 @@ def project_rows(jobs: list[Mapping], intervals_fn: Callable, metashape_fn: Call
         site_name_fn: site code -> full name.
         now: the time of the reading.
         notes: program A's note dicts (the last note of each transect).
-        upload_fn: upload id -> the set record, or None when it cannot be read.
+        upload_fn: upload id -> (the set record, "") or (None, the reason it
+            cannot be read); None shows no upload progress.
+        live_upload_statuses: the set statuses shown as progress
+            (jobstore.UPLOAD_LIVE_STATUSES); a set that has ended shows none.
         state_words: transect state -> the word a card shows.
         sort_key: the registry's readable id order.
     """
     words = state_words or {}
+    live = frozenset(live_upload_statuses)
     ends = windows(jobs)
     plan = []
     for job in jobs:
@@ -302,8 +362,9 @@ def project_rows(jobs: list[Mapping], intervals_fn: Callable, metashape_fn: Call
         until = ends.get((_text(job.get("job_id")), transect["processing_folder"]))
         figures = durations(readings.get(transect["readable_ids"][0], []), since, until)
         metashape = metashape_fn(_open_events(project.get("opens")))
-        rows.append(_row(job, transect, project, figures, _mapping(metashape), now, until, note_list, upload_fn,
-                         words))
+        state = _text(project.get("state")) or STATE_TODO
+        upload = _upload_of(state, project, _text(job.get("job_id")), transect, upload_fn, live)
+        rows.append(_row(job, transect, project, figures, _mapping(metashape), now, until, note_list, upload, words))
     return rows
 
 

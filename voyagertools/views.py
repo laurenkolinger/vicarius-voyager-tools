@@ -49,7 +49,7 @@ from functools import wraps
 from pathlib import Path
 
 import yaml
-from flask import Blueprint, g, jsonify, render_template, request, session
+from flask import Blueprint, current_app, g, jsonify, render_template, request, session
 
 from . import camera_tool, clean_manual_edit, clean_workbench, order_tool, rewind
 from . import paramsstore as ps
@@ -84,6 +84,9 @@ VICARIUS_ROOT = Path(os.environ.get("VICARIUS_ROOT") or "/mnt/rip/vicarius_drive
 DRIVE_ROOT = VICARIUS_ROOT.parent
 REGISTRY_LIB_DIR = VICARIUS_ROOT / "_METADATA" / "3d"
 MANUAL_EDIT_CLONE = VICARIUS_ROOT / "modules" / "manual_edit" / "github_repo"
+# The manual edit module's blueprint name: only an app that mounts it runs
+# its upload runner, so only there may a stranded upload set be recovered.
+MANUAL_EDIT_BLUEPRINT = "manual_edit"
 DRIVER_CLONE = VICARIUS_ROOT / "modules" / "driver" / "github_repo"
 NAS_YAML = DRIVER_CLONE / "config" / "nas.yaml"
 LOCKS_PATH = VICARIUS_ROOT / "_METADATA" / "module_locks.json"
@@ -161,6 +164,29 @@ def _jobstore_module():
 def _job_store_default():
     """A manual edit JobStore on the registry's root (so a test's temp root carries both)."""
     return _jobstore_module().JobStore(_registry_module().ROOT)
+
+
+def _recover_uploads_default(store) -> None:
+    """Mark every upload set a desktop restart stranded as interrupted, through the manual edit module's recovery.
+
+    Runs only in an app that mounts the manual edit blueprint, whose upload
+    runner knows which sets are live in this process; any other host (the
+    standalone panel) leaves the sets alone, since another process may be
+    running them. A recovery that stops is logged, never raised, as the
+    manual edit module's own routes do.
+
+    Parameters:
+        store: the manual edit JobStore the caller reads.
+    """
+    if MANUAL_EDIT_BLUEPRINT not in current_app.blueprints:
+        return
+    jobstore = _jobstore_module()
+    manual_views = importlib.import_module("manualedit.views")
+    transfers = importlib.import_module("manualedit.transfers")
+    try:
+        transfers.recover_stale_uploads(manual_views.get_deps(), store)
+    except jobstore.JobStoreError as exc:
+        current_app.logger.warning("voyager tools: the stale upload recovery stopped: %s", exc)
 
 
 def _active_jobs_default() -> list[dict]:
@@ -257,7 +283,9 @@ class Deps:
     prompts_doc() -> Path; now_iso() -> str; record_setting(phase, key,
     old_version, new_version, by, reason) -> the recorded time, the
     settings history line of a parameter save (the desktop wires
-    settings_stores.record_params_save; the default refuses).
+    settings_stores.record_params_save; the default refuses);
+    recover_uploads(store), the manual edit module's recovery of upload
+    sets a desktop restart stranded.
     """
 
     def __init__(self):
@@ -279,6 +307,7 @@ class Deps:
         self.prompts_doc: Callable[[], Path] = lambda: PROMPTS_DOC
         self.now_iso: Callable[[], str] = lambda: datetime.now(AST).isoformat(timespec="seconds")
         self.record_setting: Callable[..., str] = _record_setting_refused
+        self.recover_uploads: Callable = _recover_uploads_default
 
 
 deps = Deps()
