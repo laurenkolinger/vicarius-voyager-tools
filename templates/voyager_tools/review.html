@@ -1,0 +1,29 @@
+{#
+  File:    templates/voyager_tools/review.html
+  Purpose: The review fragment of one transect (program C spec sections 3.5,
+           4.11 and 5.5, milestone C6), served by
+           manual_edit_views.review_fragment_payload for ?tool=review and
+           mounted by window.VoyagerTools.mountReview (static/vt_review.js):
+           in the atlas's review sidecar and under the Review queue pane's
+           list. The head is rendered here from the job record; the body is
+           filled from program B's review record (its dossier route). The
+           root carries the panel's own class, so the panel's stylesheet
+           (every rule scoped under .voyager-tools) applies wherever it sits.
+           Every value is escaped by Jinja's autoescape.
+  Vars:    base, v, job_id, psx, processing_folder, site, site_name,
+           transect, readable_ids.
+#}
+<section class="voyager-tools vt-review" data-vt-base="{{ base }}" data-vt-version="{{ v }}" data-job="{{ job_id }}" data-psx="{{ psx }}">
+  <div class="vt-review-head">
+    <p class="vt-review-where">
+      {%- if site_name %}<span class="vt-site">{{ site_name }}</span> <span class="id code">{{ site }}</span>
+      {%- else %}<span class="id code" title="The site table has no full name for {{ site }}.">{{ site }}</span>{% endif %}
+      <span class="vt-review-transect">{{ transect }}</span>
+      <span class="id code">{{ psx }}</span>
+    </p>
+    <p class="count vt-review-ids">{{ processing_folder }}: {{ readable_ids | join(", ") }}</p>
+  </div>
+  <div class="vt-review-body" data-review-part="body">
+    <p class="count">Reading the review record...</p>
+  </div>
+</section>

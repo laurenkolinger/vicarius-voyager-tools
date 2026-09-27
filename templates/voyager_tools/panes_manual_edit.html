@@ -1,14 +1,49 @@
 {#
   File:    templates/voyager_tools/panes_manual_edit.html
   Purpose: The manual edit panes of the Atlas control panel (program C spec
-           sections 3.7 to 3.9, 4.12 and 5.5), included by panel.html inside
-           <div class="vt-panes">: Uploads (static/vt_uploads.js, over
-           program B's /manual-edit/api routes) and Timelines
+           sections 3.6 to 3.9, 4.10, 4.12 and 5.5), included by panel.html
+           inside <div class="vt-panes">: Review queue (static/vt_review.js,
+           over /voyager-tools/api/review/queue, with one transect's review
+           fragment mounted under the list), Uploads (static/vt_uploads.js,
+           over program B's /manual-edit/api routes) and Timelines
            (static/vt_timelines.js, over /voyager-tools/api/timelines).
            Var-free: every list and table is filled by its script. The
            upload progress window is not here: vt_uploads.js appends it to
            the page body so a relock that hides the panel leaves it open.
 #}
+
+      {# Review queue #}
+      <section class="vt-pane" id="vt-review" role="tabpanel" data-vt-pane="review" aria-labelledby="vt-review-h" hidden>
+        <div class="pane-head">
+          <h2 id="vt-review-h">Review queue</h2>
+          <button type="button" class="tip" aria-label="About the review queue" title="Admin review is where a transect waits on the edit bench when a check failed or it came back from an earlier review. VICARIUS lists every such transect across the unfinished manual edit projects, and an admin decides each one with a report."><span>i</span></button>
+        </div>
+        <p class="count vt-line" data-vt="review-meta"></p>
+        <div class="vt-list-head">
+          <h3 class="vt-list-title" id="vt-review-items-h">In admin review</h3>
+        </div>
+        <ul class="rows vt-striped" data-vt="review-items" aria-labelledby="vt-review-items-h"></ul>
+        <div data-vt="review-stopped-wrap" hidden>
+          <div class="vt-list-head">
+            <h3 class="vt-list-title" id="vt-review-stopped-h">Start over stopped</h3>
+            <button type="button" class="tip" aria-label="About stopped start overs" title="A start over stops when the free space cannot be read, the copy fails or the desktop restarts. VICARIUS keeps the edited copy aside and resumes from the stage it reached when an admin presses Resume start over."><span>i</span></button>
+          </div>
+          <ul class="rows vt-striped" data-vt="review-stopped" aria-labelledby="vt-review-stopped-h"></ul>
+        </div>
+        <div data-vt="review-returnable-wrap" hidden>
+          <div class="vt-list-head">
+            <h3 class="vt-list-title" id="vt-review-returnable-h">Marked for upload</h3>
+            <button type="button" class="tip" aria-label="About transects marked for upload" title="An admin may move a transect marked for upload back to admin review until an upload set takes it. VICARIUS then asks for a new decision on it."><span>i</span></button>
+          </div>
+          <ul class="rows vt-striped" data-vt="review-returnable" aria-labelledby="vt-review-returnable-h"></ul>
+        </div>
+        <ul class="vt-problems" data-vt="review-unmatched" hidden></ul>
+        <div class="actions">
+          <button type="button" class="btn" data-vt="review-refresh">Refresh</button>
+        </div>
+        <p class="result" data-vt="review-result" role="status"></p>
+        <div class="vt-review-area" data-vt="review-area" hidden></div>
+      </section>
 
       {# Uploads #}
       <section class="vt-pane" id="vt-uploads" role="tabpanel" data-vt-pane="uploads" aria-labelledby="vt-uploads-h" hidden>

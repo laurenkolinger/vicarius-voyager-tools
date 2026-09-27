@@ -6,12 +6,13 @@ Purpose: The web layer of the Atlas control panel (module voyager_tools;
          /voyager-tools by the VICARIUS desktop
          (vicarius_ui_os/voyager_tools_views.py) and by standalone_app.py. It
          serves the page, the fragment the desktop window and the atlas embed
-         (the plain window, or ?tool=panel for the atlas's Control panel
-         tab), and the JSON API of the eight tools: the processing order,
+         (the plain window, ?tool=panel for the atlas's Control panel
+         tab, or ?tool=review for one transect's review content), and the
+         JSON API of the eight tools: the processing order,
          clean workbench, clean manual edit run, rewind, spot redo, the
          prompts doc, the parameter defaults and the camera model table. The
-         Timelines routes live in manual_edit_views.py on the same
-         blueprint; the Uploads pane reads and starts uploads through the
+         Timelines and Review queue routes and the review fragment's payload
+         live in manual_edit_views.py on the same blueprint; the Uploads pane reads and starts uploads through the
          manual edit module's own /manual-edit/api routes. The
          settings panes of the panel read and write the desktop's own
          /api/settings routes (vicarius_ui_os/settings_views.py), not routes
@@ -61,20 +62,28 @@ URL_PREFIX = "/voyager-tools"
 MODULE_SLUG = "voyager_tools"
 DISPLAY_NAME = "Atlas control panel"
 UI_STYLE = "voyager_tools"
-ASSET_VERSION = "20260927g"
+ASSET_VERSION = "20260927h"
 ROOT_SECTION_PREFIX = '<section class="voyager-tools"'
 STATIC_JS = "voyager_tools.js"
 STATIC_SETTINGS_JS = "vt_settings.js"  # the settings and desktop panes (program C spec 5.3)
 STATIC_UPLOADS_JS = "vt_uploads.js"  # the Uploads pane (milestone C7)
 STATIC_TIMELINES_JS = "vt_timelines.js"  # the Timelines pane (milestone C8)
+STATIC_REVIEW_JS = "vt_review.js"  # the Review queue pane and VoyagerTools.mountReview (milestone C6)
 STATIC_CSS = "voyager_tools.css"
 # Load order: the pane seam first, then one script per group of panes.
-PANEL_SCRIPTS = (STATIC_JS, STATIC_SETTINGS_JS, STATIC_UPLOADS_JS, STATIC_TIMELINES_JS)
+PANEL_SCRIPTS = (STATIC_JS, STATIC_SETTINGS_JS, STATIC_UPLOADS_JS, STATIC_TIMELINES_JS, STATIC_REVIEW_JS)
+# The review fragment (program C spec 4.11) loads the pane seam, the upload
+# window its Start the upload now opens (vt_uploads.js), and the review content.
+REVIEW_SCRIPTS = (STATIC_JS, STATIC_UPLOADS_JS, STATIC_REVIEW_JS)
 TOOL_PARAM = "tool"
 TOOL_PANEL = "panel"
+TOOL_REVIEW = "review"
 MOUNT_WINDOW = "VoyagerTools.mount"
 MOUNT_PANEL = "VoyagerTools.mountPanel"
+MOUNT_REVIEW = "VoyagerTools.mountReview"
+UI_STYLE_REVIEW = "voyager_tools_review"
 FRAGMENT_TOOLS = {None: MOUNT_WINDOW, TOOL_PANEL: MOUNT_PANEL}
+TOOL_NAMES = (TOOL_PANEL, TOOL_REVIEW)
 
 _PKG = Path(__file__).resolve().parent
 CLONE_ROOT = _PKG.parent
@@ -189,6 +198,37 @@ def _recover_uploads_default(store) -> None:
         current_app.logger.warning("voyager tools: the stale upload recovery stopped: %s", exc)
 
 
+def _recover_restarts_default(records: list[dict]) -> list[dict]:
+    """Stop every start over a desktop restart stranded, through the manual edit module's recovery.
+
+    Runs only in an app that mounts the manual edit blueprint, whose leg
+    registry knows which start overs are live in this process (the same
+    rule as _recover_uploads_default); any other host returns the records
+    as they are. A recovery that stops is logged, never raised, and that
+    record is returned as read.
+
+    Parameters:
+        records: the unfinished job records the caller read.
+
+    Returns:
+        The records after recovery, in the same order.
+    """
+    if MANUAL_EDIT_BLUEPRINT not in current_app.blueprints:
+        return records
+    jobstore = _jobstore_module()
+    manual_views = importlib.import_module("manualedit.views")
+    transfers = importlib.import_module("manualedit.transfers")
+    store, recovered = deps.job_store(), []
+    for record in records:
+        try:
+            recovered.append(transfers.recover_stale_restarts(manual_views.get_deps(), store, record))
+        except jobstore.JobStoreError as exc:
+            current_app.logger.warning("voyager tools: the stranded start over recovery of %s stopped: %s",
+                                       record.get(JOB_ID_KEY), exc)
+            recovered.append(record)
+    return recovered
+
+
 def _active_jobs_default() -> list[dict]:
     """Every unfinished manual edit job record, oldest first (several projects at once).
 
@@ -285,7 +325,8 @@ class Deps:
     settings history line of a parameter save (the desktop wires
     settings_stores.record_params_save; the default refuses);
     recover_uploads(store), the manual edit module's recovery of upload
-    sets a desktop restart stranded.
+    sets a desktop restart stranded; recover_restarts(records) -> records,
+    its recovery of start overs a desktop restart stranded.
     """
 
     def __init__(self):
@@ -308,6 +349,7 @@ class Deps:
         self.now_iso: Callable[[], str] = lambda: datetime.now(AST).isoformat(timespec="seconds")
         self.record_setting: Callable[..., str] = _record_setting_refused
         self.recover_uploads: Callable = _recover_uploads_default
+        self.recover_restarts: Callable[[list], list] = _recover_restarts_default
 
 
 deps = Deps()
@@ -499,15 +541,41 @@ def page():
 
 
 def _fragment_tool(value) -> str | None:
-    """The fragment variant a ?tool= value names: None (the desktop window) or TOOL_PANEL.
+    """The fragment variant a ?tool= value names: None (the desktop window), TOOL_PANEL or TOOL_REVIEW.
 
     Raises:
         RequestError: 400 for any other value, in one sentence.
     """
     tool = value if isinstance(value, str) and value else None
-    if tool not in FRAGMENT_TOOLS:
-        raise RequestError(f"The fragment has no tool named {tool[:40]!r}; ask for tool=panel or no tool.")
+    if tool is not None and tool not in TOOL_NAMES:
+        raise RequestError(f"The fragment has no tool named {tool[:40]!r}; ask for tool=panel, tool=review "
+                           "or no tool.")
     return tool
+
+
+def asset_urls(names) -> list[str]:
+    """The addresses of this blueprint's static files, each with the asset version as its cache bust."""
+    return [f"{URL_PREFIX}/static/{name}?v={ASSET_VERSION}" for name in names]
+
+
+def gate_payload() -> dict | None:
+    """The payload a fragment answers when a gate stops it, or None when the module is open and admin mode is on.
+
+    Returns:
+        Locked module: the desktop's locked payload (ui_style locked, 200).
+        Outside admin mode: ui_style locked with the admin body and the 401
+        keys (need_unlock, admin_required), so a host that shows it as it is
+        shows the admin line.
+    """
+    module = {"name": MODULE_SLUG, "display_name": DISPLAY_NAME}
+    if deps.is_locked():
+        return {"ui_style": "locked", "locked": True, "html": lock_body_html(), "module": module}
+    if not deps.is_admin():
+        payload = {"ui_style": "locked", "locked": False, "admin_required": True, "html": admin_body_html(),
+                   "module": module}
+        payload.update(ADMIN_ERROR)
+        return payload
+    return None
 
 
 def fragment_payload(tool: str | None = None) -> dict:
@@ -523,24 +591,23 @@ def fragment_payload(tool: str | None = None) -> dict:
         a host that returns it as-is shows the admin line. Otherwise the
         section, the scripts in load order, the stylesheet and the mount.
     Raises:
-        RequestError: an unknown tool (400).
+        RequestError: an unknown tool, or TOOL_REVIEW, whose payload is
+            manual_edit_views.review_fragment_payload (400).
     """
-    mount = FRAGMENT_TOOLS[_fragment_tool(tool)]
-    if deps.is_locked():
-        return {"ui_style": "locked", "locked": True, "html": lock_body_html(),
-                "module": {"name": MODULE_SLUG, "display_name": DISPLAY_NAME}}
-    if not deps.is_admin():
-        payload = {"ui_style": "locked", "locked": False, "admin_required": True, "html": admin_body_html(),
-                   "module": {"name": MODULE_SLUG, "display_name": DISPLAY_NAME}}
-        payload.update(ADMIN_ERROR)
-        return payload
+    tool = _fragment_tool(tool)
+    if tool not in FRAGMENT_TOOLS:
+        raise RequestError("The review fragment needs a manual edit project and a transect; ask for "
+                           "tool=review with job and psx.")
+    mount = FRAGMENT_TOOLS[tool]
+    gate = gate_payload()
+    if gate is not None:
+        return gate
     page_html = render_template("voyager_tools/index.html", base=URL_PREFIX, v=ASSET_VERSION)
     section = slice_section(page_html, ROOT_SECTION_PREFIX)
     if section is None:
         return {"error": "could not extract the Atlas control panel fragment"}
     return {"ui_style": UI_STYLE, "locked": False, "html": section, "base": URL_PREFIX,
-            "scripts": [f"{URL_PREFIX}/static/{name}?v={ASSET_VERSION}" for name in PANEL_SCRIPTS],
-            "styles": [f"{URL_PREFIX}/static/{STATIC_CSS}?v={ASSET_VERSION}"], "mount": mount,
+            "scripts": asset_urls(PANEL_SCRIPTS), "styles": asset_urls((STATIC_CSS,)), "mount": mount,
             "module": {"name": MODULE_SLUG, "display_name": DISPLAY_NAME}}
 
 
@@ -555,11 +622,22 @@ def fragment_status(payload: Mapping) -> int:
 
 @voyager_tools_bp.route("/fragment", methods=["GET"])
 def fragment():
-    """The fragment route: the payload with its status; ?tool=panel for the atlas's Control panel tab."""
+    """The fragment route: the payload with its status.
+
+    ?tool=panel serves the atlas's Control panel tab; ?tool=review&job=&psx=
+    the review content of one transect (the atlas's review sidecar and the
+    Review queue pane); no tool the desktop window.
+    """
     try:
-        payload = fragment_payload(request.args.get(TOOL_PARAM))
+        tool = _fragment_tool(request.args.get(TOOL_PARAM))
+        if tool == TOOL_REVIEW:
+            payload = manual_edit_views.review_fragment_payload(request.args.get("job"), request.args.get("psx"))
+        else:
+            payload = fragment_payload(tool)
     except RequestError as exc:
-        return jsonify({"error": str(exc)}), exc.status
+        body = {"error": str(exc)}
+        body.update(exc.extra)
+        return jsonify(body), exc.status
     return jsonify(payload), fragment_status(payload)
 
 
@@ -1222,11 +1300,13 @@ def api_seasons_save():
 
 __all__ = [
     "voyager_tools_bp", "deps", "Deps", "RequestError", "fragment_payload", "fragment_status", "guarded",
-    "slice_section", "render_markdown", "lock_body_html", "lock_page_html", "admin_body_html",
+    "slice_section", "render_markdown", "lock_body_html", "lock_page_html", "admin_body_html", "gate_payload",
+    "asset_urls",
     "URL_PREFIX", "MODULE_SLUG", "DISPLAY_NAME", "UI_STYLE", "ASSET_VERSION", "ROOT_SECTION_PREFIX",
     "LOCK_MESSAGE", "ADMIN_ERROR", "ADMIN_MESSAGE", "PROMPTS_DOC", "PARAMS_HISTORY_ONLY_ON_DESKTOP",
 ]
 
-# The manual edit routes (the Timelines pane) register on the same blueprint;
-# imported last because they use the gates and seams defined above.
+# The manual edit routes (the Timelines and Review queue panes, the review
+# fragment) register on the same blueprint; imported last because they use
+# the gates and seams defined above.
 from . import manual_edit_views  # noqa: E402,F401  (registers routes on voyager_tools_bp)

@@ -17,6 +17,9 @@
  * window open, the upload keeps running on the server, and the component
  * shows Stop only while its own reading says admin (chain decision 8).
  *
+ * The same progress window serves the review content's Start the upload now
+ * (static/vt_review.js): it is exported as window.VoyagerTools.openUploadWindow.
+ *
  * The pure helpers (readyItems, runningItems, reviewItems, recentUploads,
  * uploadPlanLines, statusRole) are exported to node through module.exports
  * for tests/test_manual_edit_pins.py.
@@ -249,7 +252,7 @@
 
   // openUploadWindow(uploadId, opts): the progress window as a dialog on the
   // page body (one at a time). opts = {version, readInitials(), onClosed(),
-  // onNewUpload(id)}.
+  // onNewUpload(id)}; every callback is optional.
   function openUploadWindow(uploadId, opts) {
     if (openWindow) openWindow.close();
     var opener = document.activeElement;
@@ -273,7 +276,7 @@
       if (layer.parentNode) layer.parentNode.removeChild(layer);
       if (openWindow && openWindow.layer === layer) openWindow = null;
       if (opener && opener.isConnected && typeof opener.focus === "function") opener.focus();
-      if (opts.onClosed) opts.onClosed();
+      if (typeof opts.onClosed === "function") opts.onClosed();
     }
     // Escape closes the window without bubbling: the desktop closes a window on a bubbled Escape.
     function onKey(e) { if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); close(); } }
@@ -292,10 +295,14 @@
         return;
       }
       handle = window.ManualEditUpload.mount(dialog, { uploadId: uploadId, base: MANUAL_EDIT_BASE, onClose: close,
-                                                       getInitials: opts.readInitials, onNewUpload: opts.onNewUpload });
+                                                       getInitials: opts.readInitials || function () { return ""; },
+                                                       onNewUpload: opts.onNewUpload });
     });
     return openWindow;
   }
+
+  // The review content opens its Start the upload now in the same window.
+  window.VoyagerTools = Object.assign(window.VoyagerTools || {}, { openUploadWindow: openUploadWindow });
 
   /* ---- the pane ------------------------------------------------------------------ */
 
