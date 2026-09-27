@@ -1072,7 +1072,7 @@
           return '<li class="row"><span class="row-name">' + idChip(r.readable_id) + '</span><span class="row-meta">step 2 finished ' + esc(r.step2_finished || "at an unrecorded time") + "</span></li>";
         });
         return "<h3>" + esc(plan.transect) + " again in Voyager 2</h3>" +
-          '<p class="count">Nothing moves now; the next Voyager 2 turn renames the old Shelf output folder before it deposits the new one.</p>' +
+          '<p class="count">Nothing moves now; the next Voyager 2 turn rebuilds every product before it deposits a new output folder.</p>' +
           "<h3>Timepoints to mark (" + plan.rows.length + ")</h3><ul class=\"rows\">" + listHtml(rows) + "</ul>";
       }
 
@@ -1126,14 +1126,14 @@
           return {
             title: "Run the transect again in Voyager 2",
             lines: ["Mark " + plan.transect + " for another Voyager 2 run: " + plural(plan.rows.length, "timepoint gets", "timepoints get") + " a redo request.",
-                    "Nothing moves now; the next Voyager 2 turn renames the old Shelf output folder before it deposits the new one."],
+                    "Nothing moves now; the next Voyager 2 turn rebuilds every product before it deposits a new output folder."],
             okLabel: "Request the redo"
           };
         }
         var lines = [(plan.shelf_folder ? "Rename " + plan.shelf_folder + " on the Shelf with _voy2_archive_ and the time of the rename, then clear " : "Clear ") +
                      "the step 2 cells and Voyager 2 facts of " + plural(plan.rows.length, "timepoint", "timepoints") + " of " + plan.transect + "."];
         if (plan.vigil_references.length) {
-          lines.push("VIGIL holds " + plan.vigil_references.map(function (v) { return v.readable_id; }).join(", ") + "; those VIGIL records keep pointing at the renamed folder.");
+          lines.push("VIGIL still holds its copies of " + plan.vigil_references.map(function (v) { return v.readable_id; }).join(", ") + " on the VIGIL stage; they show the products this rewind retires.");
         }
         return { title: "Rewind before Voyager 2", lines: lines, okLabel: plan.vigil_references.length ? "Rewind anyway" : "Apply rewind" };
       }

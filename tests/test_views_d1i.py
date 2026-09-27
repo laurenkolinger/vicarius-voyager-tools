@@ -240,6 +240,7 @@ class RewindBeforeVoyager2(Layout):
 
 class SpotRedoVoyager2(RewindBeforeVoyager2):
     def test_plan_and_apply_write_the_redo_request(self):
+        views.deps.now_iso = lambda: "2026-10-03T09:15:00-04:00"
         r = self.client.post("/voyager-tools/api/spot-redo/plan", json={"readable_id": RID_DONE, "phase": "voyager2"})
         self.assertEqual(r.status_code, 200, r.get_json())
         self.assertEqual([x["readable_id"] for x in r.get_json()["plan"]["rows"]], [RID_DONE])
@@ -247,7 +248,7 @@ class SpotRedoVoyager2(RewindBeforeVoyager2):
                              json={"readable_id": RID_DONE, "phase": "voyager2", "initials": "LO", "confirm": True})
         self.assertEqual(r.status_code, 200, r.get_json())
         fact = self.registry.fact_sections(RID_DONE)["voyager2"]["redo_requested"]
-        self.assertTrue(fact["value"].startswith("requested "))
+        self.assertEqual(fact["value"], "requested 2026-10-03T09:15:00-04:00 by LO")
         self.assertEqual(fact["recorded_by"], "voyager_tools:LO")
         self.assertTrue(self.local_out.exists())
 

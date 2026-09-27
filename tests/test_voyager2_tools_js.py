@@ -85,7 +85,7 @@ class Voyager2Panes(PanesCase):
         check(results, 'dialog', await waitFor(function () { return !!dialog(); }));
         var ok = dialog().querySelector('[data-vt-dialog="ok"]');
         check(results, 'ok_label', ok.textContent === 'Rewind anyway', ok.textContent);
-        check(results, 'dialog_vigil', /VIGIL holds MRS_T1_2023ann/.test(dialog().textContent), dialog().textContent);
+        check(results, 'dialog_vigil', /VIGIL still holds its copies of MRS_T1_2023ann on the VIGIL stage/.test(dialog().textContent), dialog().textContent);
         ok.click();
         check(results, 'applied', await waitFor(function () { return /Rewound MRS_T1 before Voyager 2/.test(vt('rw-result').textContent); }));
         var body = calls('POST', '/voyager-tools/api/rewind/apply')[0].body;

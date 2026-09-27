@@ -293,16 +293,54 @@ class Apply(Case):
         section = self.reg.fact_sections(IDS[0])["voyager2"]
         self.assertTrue(all(not v["value"] for v in section.values()))
 
-    def test_a_test_run_section_alone_is_cleared_without_a_rename(self):
+    def seed_test_only(self, output_shelf):
+        """BWR T1 with only a test run: no step 2 cells, a voyager2 section naming its Shelf output folder."""
         seed_status(self.reg, "BWR_T1_2025_pbl", "editing", site="BWR", transect="T1", year="2025",
                     season_token="_pbl", processing_location="/mnt/rip/driver_staging/editbench/BWR_T1_3D")
-        self.reg.set_facts("BWR_T1_2025_pbl", "voyager2", {"run_kind": "test", "output_shelf": f"{HOST}:{PARENT}/BWR_T1_3doutput"},
+        self.reg.set_facts("BWR_T1_2025_pbl", "voyager2", {"run_kind": "test", "output_shelf": output_shelf},
                            "3D_phase2")
+
+    def test_a_test_run_output_folder_is_renamed_like_a_real_one(self):
+        test_out = f"{PARENT}/BWR_T1_3doutput"
+        Path(str(self.shelf) + test_out).mkdir(parents=True)
+        self.seed_test_only(f"{HOST}:{test_out}")
+        plan = rv2.plan("BWR_T1_2025_pbl", self.reg, **self.kw(stamp=STAMP))
+        self.assertEqual(plan["shelf_folder"], test_out)
+        self.assertEqual(plan["warnings"], [])
+        manifest = rv2.apply("BWR_T1_2025_pbl", self.reg, ACTOR, "LO", self.archive, **self.kw(stamp=STAMP))
+        renamed = f"{test_out}{rv2.ARCHIVE_INFIX}{STAMP}"
+        self.assertEqual(manifest["archived_to"], renamed)
+        self.assertEqual(self.renamed, [(test_out, renamed)])
+        self.assertTrue(Path(str(self.shelf) + renamed).is_dir())
+        self.assertIn(renamed, self.reg.get("BWR_T1_2025_pbl")["notes"])
+        section = self.reg.fact_sections("BWR_T1_2025_pbl")["voyager2"]
+        self.assertTrue(all(not v["value"] for v in section.values()))
+        self.assertEqual(self.reg.get("BWR_T1_2025_pbl")["manual_edit_status"], "editing")
+
+    def test_a_test_run_folder_already_gone_is_named_in_the_note(self):
+        self.seed_test_only(f"{HOST}:{PARENT}/BWR_T1_3doutput")
         manifest = rv2.apply("BWR_T1_2025_pbl", self.reg, ACTOR, "LO", self.archive, **self.kw())
         self.assertIsNone(manifest["archived_to"])
-        self.assertTrue(any("test run" in w for w in manifest["warnings"]))
         self.assertEqual(self.renamed, [])
-        self.assertEqual(self.reg.get("BWR_T1_2025_pbl")["manual_edit_status"], "editing")
+        self.assertTrue(any("was not on the Shelf" in w for w in manifest["warnings"]))
+
+    def test_a_hostile_test_output_path_is_refused_before_anything_moves(self):
+        for bad in (f"{HOST}:/volume1/elsewhere/BWR_T1_3doutput", f"{HOST}:{PARENT}/../BWR_T1_3doutput",
+                    f"{HOST}:{PARENT}/MRS_T1_3doutput", f"10.0.0.9:{PARENT}/BWR_T1_3doutput",
+                    "/mnt/rip/driver_staging/voyager2_stage/test_20261001-120000/BWR_T1_3doutput"):
+            with self.subTest(bad=bad):
+                self.seed_test_only(bad)
+                with self.assertRaises(rv2.Voyager2Refused):
+                    rv2.apply("BWR_T1_2025_pbl", self.reg, ACTOR, "LO", self.archive, **self.kw())
+                self.assertEqual(self.renamed, [])
+
+    def test_a_test_output_that_disagrees_with_the_real_one_is_refused(self):
+        self.reg.set_facts(IDS[0], "voyager2", {"run_kind": "test",
+                                                "output_shelf": f"{HOST}:{SHELF_ROOT}/other_job/{OUT}"}, "3D_phase2")
+        with self.assertRaises(rv2.Voyager2Refused) as ctx:
+            rv2.apply(IDS[0], self.reg, ACTOR, "LO", self.archive, **self.kw())
+        self.assertIn("disagree", str(ctx.exception))
+        self.assertEqual(self.renamed, [])
 
     def test_a_long_notes_cell_keeps_its_last_characters(self):
         self.reg.upsert(IDS[0], {"notes": "x" * 600}, "seed")

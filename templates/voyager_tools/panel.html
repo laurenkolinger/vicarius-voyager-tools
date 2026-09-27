@@ -117,7 +117,7 @@
         <ul class="vt-problems" data-vt="wb-problems"></ul>
         <div class="pane-head vt-subhead">
           <h3 id="vt-wb-v2-h">Voyager 2 stage</h3>
-          <button type="button" class="tip" aria-label="About the Voyager 2 stage" title="The Voyager 2 stage is the local folder Voyager 2 turns copy a transect into (defaults.voyager2_stage_root in nas.yaml). A working copy can go once every timepoint it served reads step 2 complete with a verified Shelf output and no turn reserves the transect; an output folder can go when its Shelf copy matches it file for file. A test run's copy is removed by the test run itself."><span>i</span></button>
+          <button type="button" class="tip" aria-label="About the Voyager 2 stage" title="The Voyager 2 stage is the local folder Voyager 2 turns copy a transect into (defaults.voyager2_stage_root in nas.yaml), and a test run removes its own copy. A working copy can go once every timepoint it served reads step 2 complete with a verified Shelf output and no turn reserves the transect, and an output folder once its Shelf copy matches it file for file."><span>i</span></button>
         </div>
         <p class="count vt-line" data-vt="wb-v2-root"></p>
         <ul class="rows" data-vt="wb-v2-body"></ul>
@@ -142,7 +142,7 @@
       <section class="vt-pane" id="vt-rewind" role="tabpanel" data-vt-pane="rewind" aria-labelledby="vt-rewind-h" hidden>
         <div class="pane-head">
           <h2 id="vt-rewind-h">Rewind</h2>
-          <button type="button" class="tip" aria-label="About rewinds" title="A rewind takes one timepoint back to before step 1 (the Metashape reconstruction) or before step 0 (the frame extraction): its report and frames move into the processing folder's _rewind/&lt;stamp&gt;/ folder, its chunk leaves the shared project through Metashape, its status.csv cells clear and its registry cells reset with one event each. VICARIUS refuses while the row is processing, while its manual edit is under way (editing, review or upload), while its folder is on the NAS, or while the row sits in an unfinished manual edit project. Before Voyager 2 acts on the whole transect: VICARIUS renames its Shelf output folder with _voy2_archive_ and a stamp, deletes nothing, and clears the step 2 cells and Voyager 2 facts of every timepoint that carries a result."><span>i</span></button>
+          <button type="button" class="tip" aria-label="About rewinds" title="A rewind takes one timepoint back to before step 1 (the Metashape reconstruction) or before step 0 (the frame extraction): its report and frames move into the processing folder's _rewind/&lt;stamp&gt;/ folder, its chunk leaves the shared project through Metashape, its status.csv cells clear and its registry cells reset with one event each. VICARIUS refuses while the row is processing, while its manual edit is under way (editing, review or upload), while its folder is on the NAS, or while the row sits in an unfinished manual edit project. The Before Voyager 2 target acts on the whole transect: VICARIUS renames its Shelf output folder with _voy2_archive_ and a stamp, deletes nothing, and clears the step 2 cells and Voyager 2 facts of every timepoint that carries a result."><span>i</span></button>
         </div>
         <dl class="choices">
           <div>
@@ -170,7 +170,7 @@
       <section class="vt-pane" id="vt-spot" role="tabpanel" data-vt-pane="spot" aria-labelledby="vt-spot-h" hidden>
         <div class="pane-head">
           <h2 id="vt-spot-h">Spot redo</h2>
-          <button type="button" class="tip" aria-label="About spot redos" title="A Voyager 1 spot redo is a rewind before step 1 plus a voyager1 fact named spot_redo on the row, so the Voyager 1 setup window offers the timepoint again and passes --force for it. A Voyager 2 spot redo records a redo request on every complete timepoint of the transect, so Voyager 2 setup offers the transect again; nothing moves until that run renames the old Shelf output folder."><span>i</span></button>
+          <button type="button" class="tip" aria-label="About spot redos" title="A Voyager 1 spot redo is a rewind before step 1 plus a voyager1 fact named spot_redo on the row, so the Voyager 1 setup window offers the timepoint again and passes --force for it. A Voyager 2 spot redo records a redo request on every complete timepoint of the transect, so Voyager 2 setup offers the transect again and passes --force for it; nothing moves until that run deposits."><span>i</span></button>
         </div>
         <dl class="choices">
           <div>
@@ -181,7 +181,7 @@
             <dt><span id="vt-sr-phase-label">Run again in</span></dt>
             <dd role="radiogroup" aria-labelledby="vt-sr-phase-label">
               <label class="opt" title="Pick this to rewind the timepoint before step 1 and mark it for another Voyager 1 run."><input type="radio" name="vt-sr-phase" value="voyager1" checked> Voyager 1</label>
-              <label class="opt" title="Pick this to mark every complete timepoint of the transect for another Voyager 2 run. VICARIUS keeps the current products until that run deposits new ones."><input type="radio" name="vt-sr-phase" value="voyager2"> Voyager 2</label>
+              <label class="opt" title="Pick this to mark every complete timepoint of the transect for another Voyager 2 run. VICARIUS keeps the current products until that run rebuilds them and deposits the new ones."><input type="radio" name="vt-sr-phase" value="voyager2"> Voyager 2</label>
             </dd>
           </div>
         </dl>

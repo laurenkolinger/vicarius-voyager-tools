@@ -89,7 +89,7 @@ _Avoid_: reset, rollback, undo
 Taking a whole transect back to before Voyager 2: its Shelf output folder is renamed to `<name>_voy2_archive_<YYYYMMDD-HHMMSS>` and every row that carries a Voyager 2 result loses its step 2 cells, output location cells and voyager2 facts through the registry writer, with a note. Nothing is deleted.
 
 **Spot redo**:
-For Voyager 1, a rewind before step 1 plus the voyager1 fact `spot_redo` on the row, so the Voyager 1 setup window offers the timepoint again and passes `--force` for it. For Voyager 2, the voyager2 fact `redo_requested` on every complete row of the transect, so the Voyager 2 setup window offers the transect again.
+For Voyager 1, a rewind before step 1 plus the voyager1 fact `spot_redo` on the row, so the Voyager 1 setup window offers the timepoint again and passes `--force` for it. For Voyager 2, the voyager2 fact `redo_requested` on every complete row of the transect, so the Voyager 2 setup window offers the transect again and passes `--force` for it.
 _Avoid_: rerun, redo (alone)
 
 ## Parameters

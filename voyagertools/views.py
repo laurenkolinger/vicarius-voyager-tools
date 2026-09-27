@@ -1048,7 +1048,7 @@ def api_spot_redo():
     registry = deps.registry()
     row, _target = _rewind_row(registry, dict(body, target=rewind.TARGET_BEFORE_STEP1))
     return jsonify({"ok": True, "manifest": _voyager2_call(rewind_voyager2.spot_redo, row["readable_id"], registry,
-                                                           _actor(initials), initials)})
+                                                           _actor(initials), initials, now_iso=deps.now_iso)})
 
 
 # --- tool 6: the prompts doc -------------------------------------------------------------------

@@ -6,7 +6,8 @@ Purpose: The rewind and spot redo tools for Voyager 2 results (program D
          Both act on a whole transect, because Voyager 2 builds one output
          folder and one psx per transect (spec D choice C14).
          Rewind before Voyager 2: the Shelf output folder <SITE>_<T#>_3doutput
-         is renamed to <name>_voy2_archive_<YYYYMMDD-HHMMSS> (nothing on the
+         (a real turn's, or a test run's named by the voyager2 fact
+         output_shelf) is renamed to <name>_voy2_archive_<YYYYMMDD-HHMMSS> (nothing on the
          Shelf is deleted, decision 11), then for every row of the transect
          that carries a Voyager 2 result the step 2 cells and the output
          location cells are cleared, the console log is pointed into the
@@ -16,8 +17,10 @@ Purpose: The rewind and spot redo tools for Voyager 2 results (program D
          Spot redo for Voyager 2: every complete row of the transect gets the
          voyager2 fact redo_requested ("requested <ISO> by <INITIALS>"), which
          the registry's readiness rule reads as newer than step 2's finish, so
-         the Voyager 2 setup window offers the transect again; nothing moves,
-         and the next turn's archive mode deposit renames the old Shelf folder.
+         the Voyager 2 setup window offers the transect again and sends its
+         turn with force (registry.voyager2_redo_pending), so Voyager 2
+         rebuilds every product; nothing moves now, and the next turn's
+         archive mode deposit renames the old Shelf folder.
 Inputs:  a readable id, the registry library (load, get, upsert, set_facts,
          fact_sections, run_is_live, MANUAL_EDIT_INITIALS_PATTERN), the NAS
          host and Shelf root from nas.yaml, an actor and initials, and for the
@@ -158,8 +161,27 @@ def _blocker(rows: list[dict], registry_mod) -> str:
     return ""
 
 
-def _shelf_folder(rows: list[dict], transect: str, shelf_host: str, shelf_root: str) -> str | None:
-    """The one Shelf output folder the rows record, validated; None when no row records one.
+def _recorded_outputs(rows: list[dict], facts_of: Mapping[str, Mapping[str, str]]) -> list[tuple[str, str]]:
+    """(readable id, location) for every output folder the rows record.
+
+    A real turn records the row's output_location cell; a test run records
+    only the voyager2 fact output_shelf (run_kind test), and its folder has
+    the same name as a real one, so a rewind renames it too and a later real
+    turn cannot pull and reuse the test run's products.
+    """
+    found = []
+    for row in rows:
+        rid = _text(row, "readable_id")
+        facts = facts_of.get(rid, {})
+        if _text(row, "output_location"):
+            found.append((rid, _text(row, "output_location")))
+        if facts.get(RUN_KIND_KEY) == RUN_KIND_TEST and facts.get(TEST_OUTPUT_KEY):
+            found.append((rid, facts[TEST_OUTPUT_KEY]))
+    return found
+
+
+def _shelf_folder(recorded: list[tuple[str, str]], transect: str, shelf_host: str, shelf_root: str) -> str | None:
+    """The one Shelf output folder the rows record (from _recorded_outputs), validated; None when none is recorded.
 
     Raises:
         Voyager2Refused: a local path, rows that disagree, an unknown or
@@ -167,22 +189,19 @@ def _shelf_folder(rows: list[dict], transect: str, shelf_host: str, shelf_root: 
             named <SITE>_<T#>_3doutput for this transect.
     """
     found = {}
-    for row in rows:
-        location = _text(row, "output_location")
-        if not location:
-            continue
+    for rid, location in recorded:
         match = LOCATION_PATTERN.match(location)
         if not match:
-            raise Voyager2Refused(f"The Voyager 2 output of {_text(row, 'readable_id')} is still on this machine at "
-                                  f"{location}; the turn has not deposited it, so finish or release it from the "
-                                  f"driver page first.")
-        found[(match["host"], match["path"].rstrip("/"))] = row
+            raise Voyager2Refused(f"The Voyager 2 output of {rid} is still on this machine at {location}; it was "
+                                  f"never deposited on the Shelf, so finish or release its turn from the driver "
+                                  f"page first.")
+        found[(match["host"], match["path"].rstrip("/"))] = rid
     if not found:
         return None
     if len(found) > 1:
         raise Voyager2Refused(f"The rows of {transect} disagree on their Shelf output folder "
                               f"({', '.join(sorted(p for _h, p in found))}); correct them in the atlas first.")
-    (host, path), _row_of = found.popitem()
+    (host, path), _rid = found.popitem()
     if not shelf_host:
         raise Voyager2Refused("The NAS host is unknown because nas.yaml could not be read.")
     if host != shelf_host:
@@ -243,20 +262,14 @@ def plan(readable_id, registry_mod, *, shelf_host, shelf_root, stamp=None) -> di
     facts_of = {_text(r, "readable_id"): _section(registry_mod, _text(r, "readable_id"), FACT_SECTION)
                 for r in transect_rows(row, registry_mod)}
     affected = [r for r in transect_rows(row, registry_mod) if has_result(r, facts_of[_text(r, "readable_id")])]
-    folder = _shelf_folder(affected, transect, shelf_host, shelf_root)
+    folder = _shelf_folder(_recorded_outputs(affected, facts_of), transect, shelf_host, shelf_root)
     archive_to = f"{folder}{ARCHIVE_INFIX}{stamp or _now().strftime(COMPACT_FORMAT)}" if folder else None
-    warnings = []
-    for r in affected:
-        facts = facts_of[_text(r, "readable_id")]
-        if facts.get(RUN_KIND_KEY) == RUN_KIND_TEST and facts.get(TEST_OUTPUT_KEY):
-            warnings.append(f"The test run's Shelf folder {facts[TEST_OUTPUT_KEY]} of {_text(r, 'readable_id')} "
-                            f"stays as it is; the next real turn renames it in archive mode.")
     rows = [_row_plan(r, facts_of[_text(r, "readable_id")], shelf_host, folder, archive_to) for r in affected]
     chosen = has_result(row, facts_of[_text(row, "readable_id")])
     return {"readable_id": readable_id, "target": TARGET_BEFORE_STEP2, "target_words": TARGET_WORDS,
             "transect": transect, "rows": rows if chosen else [], "shelf_folder": folder if chosen else None,
             "archive_to": archive_to if chosen else None, "vigil_references": _vigil_references(affected, registry_mod),
-            "warnings": warnings, "empty": not chosen}
+            "warnings": [], "empty": not chosen}
 
 
 def plan_or_refuse(readable_id, registry_mod, *, shelf_host, shelf_root, stamp=None) -> dict:
@@ -323,7 +336,12 @@ def apply(readable_id, registry_mod, actor, initials, archive_fn: Callable, *, s
                               f"to rewind anyway.")
     archived = _rename(archive_fn, the_plan["shelf_folder"])
     at = _now()
-    what = f"Shelf output folder renamed to {archived}" if archived else "no Shelf output folder was renamed"
+    if archived:
+        what = f"Shelf output folder renamed to {archived}"
+    elif the_plan["shelf_folder"]:
+        what = f"Shelf output folder {the_plan['shelf_folder']} was not there, so nothing was renamed"
+    else:
+        what = "no Shelf output folder was renamed"
     note = f"Voyager 2 result rewound {at.strftime(NOTE_TIME_FORMAT)} by {initials}: {what}"
     warnings = list(the_plan["warnings"])
     if the_plan["shelf_folder"] and not archived:
