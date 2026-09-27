@@ -60,6 +60,18 @@ RID_WAIT_B = "MRS_T1_2024ann"
 RID_LBH = "LBH_T2_2025_pbl"
 FOLDER = "MRS_T1_3D"  # the one processing folder of MRS T1, named for site and transect alone
 
+# The grouped pane list of the Atlas control panel (program C spec 3.2 step 3):
+# group heading, then the tab keys under it in order. Review queue, Uploads
+# and Timelines join the Manual edit group in milestones C6 to C8.
+NAV_GROUPS = [
+    ("Records", ["order", "seasons", "prompts"]),
+    ("Manual edit", ["settings", "shelf", "manual"]),
+    ("Voyager", ["runs", "params", "rewind", "spot", "workbench"]),
+    ("Desktop", ["locks", "modules", "appearance", "floors", "gpu"]),
+    ("History", ["history"]),
+]
+ALL_TABS = [key for _group, keys in NAV_GROUPS for key in keys]
+
 SEED_V1 = """# params_version: 1.0.0
 # phase: voyager1
 # kind: version
@@ -255,8 +267,8 @@ class Gates(ToolsCase):
         page = r.get_data(as_text=True)
         self.assertIn("Lauren Olinger", page)
         self.assertIn('class="voyager-tools"', page)
-        self.assertEqual(page.count('role="tab"'), 8)
-        self.assertEqual(page.count('role="tabpanel"'), 8)
+        self.assertEqual(page.count('role="tab"'), len(ALL_TABS))
+        self.assertEqual(page.count('role="tabpanel"'), len(ALL_TABS))
         self.assertNotIn("UVI", page)
         # The cache-bust literal is hand-written in panel.html (data-vt-version)
         # as well as read from views.ASSET_VERSION; the two must move together
@@ -270,9 +282,12 @@ class Gates(ToolsCase):
         self.assertTrue(payload["html"].startswith('<section class="voyager-tools"'))
         self.assertTrue(payload["html"].rstrip().endswith("</section>"))
         self.assertIn("Lauren Olinger", payload["html"])
-        self.assertEqual(payload["scripts"], ["/voyager-tools/static/voyager_tools.js?v=" + views.ASSET_VERSION])
+        self.assertEqual(payload["scripts"], ["/voyager-tools/static/voyager_tools.js?v=" + views.ASSET_VERSION,
+                                              "/voyager-tools/static/vt_settings.js?v=" + views.ASSET_VERSION])
         self.assertEqual(payload["styles"], ["/voyager-tools/static/voyager_tools.css?v=" + views.ASSET_VERSION])
         self.assertEqual(payload["base"], "/voyager-tools")
+        self.assertEqual(payload["mount"], "VoyagerTools.mount")
+        self.assertEqual(payload["module"], {"name": "voyager_tools", "display_name": "Atlas control panel"})
         self.assertEqual(views.fragment_status(payload), 200)
 
     def test_fragment_without_admin_carries_the_admin_body_and_401(self):
@@ -281,11 +296,11 @@ class Gates(ToolsCase):
         payload = r.get_json()
         self.assertTrue(payload["need_unlock"])
         self.assertTrue(payload["admin_required"])
-        self.assertIn("Admin mode is required", payload["html"])
+        self.assertIn("Admin mode is off. Unlock admin to use the Atlas control panel.", payload["html"])
         self.assertEqual(views.fragment_status(payload), 401)
 
     def test_static_files_served(self):
-        for name in ("voyager_tools.js", "voyager_tools.css"):
+        for name in ("voyager_tools.js", "vt_settings.js", "voyager_tools.css"):
             r = self.client.get(f"/voyager-tools/static/{name}")
             self.assertEqual(r.status_code, 200, name)
         js = self.client.get("/voyager-tools/static/voyager_tools.js").get_data(as_text=True)
@@ -796,6 +811,133 @@ class SeasonRoutes(ToolsCase):
         self.assertEqual(r.status_code, 400)
         r = self.client.post("/voyager-tools/api/seasons", json={"season_key": "2025_pbl", "notes": 7, "initials": "LO"})
         self.assertEqual(r.status_code, 400)
+
+
+class PanelShape(ToolsCase):
+    """The Atlas control panel (program C milestone C3): the display name, the
+    grouped pane list, the nine settings and desktop panes, the panel fragment
+    and the two to four letter initials rule."""
+
+    def page(self) -> str:
+        self.unlock()
+        r = self.client.get("/voyager-tools/")
+        self.assertEqual(r.status_code, 200)
+        return r.get_data(as_text=True)
+
+    def test_display_name_in_every_visible_place(self):
+        page = self.page()
+        self.assertEqual(views.DISPLAY_NAME, "Atlas control panel")
+        self.assertIn("<title>Atlas control panel - VICARIUS</title>", page)
+        self.assertIn('<h1 class="title" id="vt-title">Atlas control panel</h1>', page)
+        self.assertIn("Atlas control panel - built by Lauren Olinger", page)
+        self.assertNotIn("Voyager tools", page)
+        self.assertIn("Atlas control panel", views.lock_body_html())
+        self.assertIn("Atlas control panel", views.admin_body_html())
+        # The code names stay (decision 9): slug, address, actor prefix, root class.
+        self.assertEqual((views.MODULE_SLUG, views.URL_PREFIX, views.ACTOR_PREFIX),
+                         ("voyager_tools", "/voyager-tools", "voyager_tools:"))
+        self.assertIn('<section class="voyager-tools" id="vt-root" data-vt-base="/voyager-tools"', page)
+
+    def test_the_pane_list_is_grouped_and_holds_every_tab_once(self):
+        import re
+        page = self.page()
+        nav = page[page.index('<nav class="vt-nav"'):page.index("</nav>")]
+        items = re.findall(r'<p class="vt-nav-group" role="presentation">([^<]+)</p>|data-vt-tab="([a-z_]+)"', nav)
+        groups, current = [], None
+        for heading, key in items:
+            if heading:
+                current = (heading.strip(), [])
+                groups.append(current)
+            else:
+                self.assertIsNotNone(current, "a tab sits before the first group heading")
+                current[1].append(key)
+        self.assertEqual(groups, [(name, keys) for name, keys in NAV_GROUPS])
+        keys = re.findall(r'data-vt-tab="([a-z_]+)"', page)
+        self.assertEqual(sorted(keys), sorted(ALL_TABS))
+        self.assertEqual(len(keys), len(set(keys)))
+
+    def test_every_tab_has_its_pane_a_heading_and_a_show_tooltip(self):
+        import re
+        page = self.page()
+        for key in ALL_TABS:
+            with self.subTest(key=key):
+                tab = re.search(r'<button[^>]*data-vt-tab="' + key + r'"[^>]*>', page).group(0)
+                self.assertIn(f'aria-controls="vt-{key}"', tab)
+                self.assertRegex(tab, r'title="Show ')
+                pane = re.search(r'<section class="vt-pane" id="vt-' + key + r'"[^>]*>', page)
+                self.assertIsNotNone(pane, f"no pane for {key}")
+                self.assertIn(f'data-vt-pane="{key}"', pane.group(0))
+                body = views.slice_section(page, pane.group(0))
+                self.assertIn("<h2", body)
+                self.assertIn('class="tip"', body)
+
+    def test_settings_panes_carry_fields_reason_and_one_primary_button(self):
+        page = self.page()
+        for key, button in (("settings", "Save manual edit settings"), ("shelf", "Save the Shelf copy setting"),
+                            ("runs", "Save Voyager run settings"), ("floors", "Save space floors")):
+            with self.subTest(key=key):
+                body = views.slice_section(page, f'<section class="vt-pane" id="vt-{key}"')
+                self.assertIn(f'data-vt="{key}-fields"', body)
+                self.assertIn(f'data-vt="{key}-reason"', body)
+                self.assertIn(f'data-vt="{key}-meta"', body)
+                self.assertIn(f'data-vt="{key}-drift"', body)
+                self.assertIn(f'data-vt="{key}-result"', body)
+                self.assertEqual(body.count("btn-primary"), 1)
+                self.assertIn(f">{button}</button>", body)
+        self.assertNotIn("admin gated", page.lower())
+        self.assertNotIn("admin-gated", page.lower())
+
+    def test_panel_fragment_mounts_the_panel(self):
+        self.unlock()
+        r = self.client.get("/voyager-tools/fragment?tool=panel")
+        self.assertEqual(r.status_code, 200)
+        payload = r.get_json()
+        self.assertEqual(payload["mount"], "VoyagerTools.mountPanel")
+        self.assertEqual(payload["ui_style"], "voyager_tools")
+        self.assertTrue(payload["html"].startswith('<section class="voyager-tools"'))
+        self.assertEqual(payload["scripts"], ["/voyager-tools/static/voyager_tools.js?v=" + views.ASSET_VERSION,
+                                              "/voyager-tools/static/vt_settings.js?v=" + views.ASSET_VERSION])
+        self.assertEqual(payload["styles"], ["/voyager-tools/static/voyager_tools.css?v=" + views.ASSET_VERSION])
+
+    def test_an_unknown_tool_is_refused_in_one_sentence(self):
+        self.unlock()
+        for tool in ("review", "../x", "PANEL", "", "a" * 300):
+            with self.subTest(tool=tool[:20]):
+                r = self.client.get("/voyager-tools/fragment", query_string={"tool": tool})
+                if tool == "":
+                    self.assertEqual(r.status_code, 200)  # an empty tool is the plain window
+                    continue
+                self.assertEqual(r.status_code, 400)
+                error = r.get_json()["error"]
+                self.assertTrue(error.endswith("."))
+                self.assertLess(len(error), 200)
+
+    def test_panel_fragment_outside_admin_and_locked(self):
+        r = self.client.get("/voyager-tools/fragment?tool=panel")
+        self.assertEqual(r.status_code, 401)
+        self.assertTrue(r.get_json()["need_unlock"])
+        self.unlock()
+        self.locked = True
+        r = self.client.get("/voyager-tools/fragment?tool=panel")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.get_json()["ui_style"], "locked")
+
+    def test_initials_are_two_to_four_letters(self):
+        self.unlock()
+        for bad in ("", "L", "L0", "ABCDE", "L O", "<b>x</b>", "LO\n1", 7, None):
+            with self.subTest(initials=bad):
+                r = self.client.post("/voyager-tools/api/order/unlock", json={"initials": bad})
+                self.assertEqual(r.status_code, 400)
+                self.assertEqual(r.get_json()["error"], views.LINE_INITIALS)
+        for good in ("lo ", "LO", "abcd"):
+            with self.subTest(initials=good):
+                r = self.client.post("/voyager-tools/api/order/unlock", json={"initials": good})
+                self.assertNotEqual(r.status_code, 400, r.get_json())
+        self.assertEqual(views.INITIALS_PATTERN.pattern, self.registry.MANUAL_EDIT_INITIALS_PATTERN.pattern)
+
+    def test_initials_field_takes_four_characters(self):
+        page = self.page()
+        self.assertIn('id="vt-initials" class="w-initials" maxlength="4"', page)
 
 
 class Helpers(unittest.TestCase):

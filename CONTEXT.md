@@ -1,14 +1,31 @@
 # voyager_tools: glossary
 
-Last updated: 2026-09-04 (LO)
+Last updated: 2026-09-27 (LO)
 
 This file is the vocabulary of the `voyager_tools` module: the words its code, UI, docs and log rows use for the things it handles, one meaning each. Agents read it before naming anything in this clone. The platform glossary at `/mnt/rip/vicarius_drive/CONTEXT.md` covers the terms every module shares, the TCRMP 3D registry glossary at `/mnt/rip/vicarius_drive/vicarius/_METADATA/3d/CONTEXT.md` covers the registry's own words (timepoint, readable id, stage, run state, manual edit status, processing location), and `/mnt/rip/vicarius_drive/CONTEXT-MAP.md` indexes every glossary on the drive. Format rules for all of them are in `/mnt/rip/vicarius_drive/docs/agents/domain.md`.
 
 ## The page
 
+**Atlas control panel**:
+The name people see for this module since 2026-09-27: the one window holding the restricted settings and tools of the atlas, the Voyager runs, the manual edit and the desktop. The slug `voyager_tools`, the address `/voyager-tools` and the actor prefix stay.
+_Avoid_: Voyager tools (the old display name), admin page, admin gated settings
+
+**Pane**:
+One entry of the panel's grouped list (Records, Manual edit, Voyager, Desktop, History) and what it shows. The eight tools are panes; so are the settings panes, the read-only desktop panes and the Settings history.
+_Avoid_: tab, panel (the panel is the whole window)
+
 **Tool**:
-One of the eight sections of the Voyager tools page, each behind one entry in the left list: Atlas edit, Clean workbench, Clean manual edit run, Rewind, Spot redo, Prompts doc, Parameter defaults, Camera model. Every tool reads through the library that owns its file and writes with the actor `voyager_tools:<INITIALS>`.
-_Avoid_: tab (the left list is a tab list in markup, but a section is a tool), panel
+One of the eight panes that act on the registry or the disks: Atlas edit, Clean workbench, Clean manual edit run, Rewind, Spot redo, Prompts doc, Parameter defaults, Camera model. Every tool reads through the library that owns its file and writes with the actor `voyager_tools:<INITIALS>`.
+
+**Settings pane**:
+A pane that edits one settings file through the desktop's write path for it (`/api/settings/<store>`): Manual edit settings, Shelf copy, Voyager runs, Space floors. Every save appends one settings history line per changed setting.
+
+**Settings history**:
+`/mnt/rip/vicarius_drive/vicarius/_METADATA/settings_history.csv`, one line per changed setting: when, who, which store and key, the old and new value as JSON text, and the reason. Written only by the desktop, never rewritten.
+
+**Drift**:
+A setting whose value in its file differs from the last value the settings history holds for it, because the file changed outside the write path. The pane names it and **Record as found** writes the missing line with the typed initials and a reason.
+_Avoid_: mismatch, stale
 
 **Admin mode**:
 The desktop session state (the ADMIN chip on port 5090, `session["admin_unlocked"]`) that every route of this module requires; outside it a route answers 401 and the desktop hides the item. Distinct from the module lock, which blocks everyone including admin.

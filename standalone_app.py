@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Module: standalone_app.py
-Purpose: A thin host that serves the Voyager tools blueprint on its own port
+Purpose: A thin host that serves the Atlas control panel blueprint on its own port
          for smoke tests away from the desktop. The desktop on port 5090 is
          the real home (vicarius_ui_os/voyager_tools_views.py mounts the same
          blueprint inside the admin session); this host exists so the page
@@ -160,7 +160,7 @@ def create_app(admin_pin: str | None = None) -> Flask:
 
 def _parser() -> argparse.ArgumentParser:
     """The command line: --port and --host."""
-    parser = argparse.ArgumentParser(description="Serve the Voyager tools page on its own port (smoke tests only).")
+    parser = argparse.ArgumentParser(description="Serve the Atlas control panel page on its own port (smoke tests only).")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"TCP port (default {DEFAULT_PORT})")
     parser.add_argument("--host", default=DEFAULT_HOST, help=f"bind address (default {DEFAULT_HOST})")
     return parser
@@ -184,7 +184,7 @@ def main(argv=None) -> int:
         print(f"standalone_app: {exc}", file=sys.stderr)
         return 2
     app = create_app()
-    print(f"Voyager tools standalone host on http://{args.host}:{port}{views.URL_PREFIX}")
+    print(f"Atlas control panel standalone host on http://{args.host}:{port}{views.URL_PREFIX}")
     app.run(host=args.host, port=port, debug=False)
     return 0
 

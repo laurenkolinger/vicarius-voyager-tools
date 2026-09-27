@@ -1,22 +1,26 @@
 # ==============================================================================
 # MODULE INTERFACE DEFINITION: voyager_tools
 # ==============================================================================
-# Voyager tools: the admin-only tools page of the Voyager program (atlas
-# processing order, clean workbench, clean manual edit run, rewind, spot redo,
-# the prompts doc, parameter defaults, camera model), served as a native
-# blueprint inside the desktop host. This contract is seeded by plan task A7
+# The Atlas control panel (module voyager_tools, display name since program C
+# milestone C3; the slug, the address /voyager-tools and the actor prefix
+# stay): the restricted settings and tools of the atlas, the Voyager runs, the
+# manual edit and the desktop (atlas processing order, camera model, prompts
+# doc, manual edit settings, Shelf copy, clean manual edit run, Voyager runs,
+# parameter defaults, rewind, spot redo, clean workbench, module locks, module
+# details, appearance, space floors, GPU ladder, settings history), served as
+# a native blueprint inside the desktop host. This contract is seeded by plan task A7
 # with the parameter store library; task B6' adds the `ui` block (style
 # voyager_tools) when the page ships. Spec: section 7 of
 # /mnt/rip/vicarius_drive/docs/superpowers/specs/2026-09-03-voyager-program-design.md
 # ==============================================================================
 
 name: "voyager_tools"
-display_name: "Voyager tools"
+display_name: "Atlas control panel"
 tags: ["3D", "TCRMP"]
 hidden: false
 hidden_reason: ""
-version: "0.2.0"
-description: "Admin-only tools for the Voyager program: edit the atlas processing order, clean the Workbench and a manual edit run, rewind or redo a row, keep the parameter defaults in voyagerparams, and record the camera model per season."
+version: "0.3.0"
+description: "The restricted settings and tools of the atlas, the Voyager runs, the manual edit and the desktop: the processing order, the camera model per season, the manual edit settings and the Shelf copy setting, the Voyager run switches, the parameter defaults in voyagerparams, rewind and spot redo, clean workbench and clean manual edit run, the space floors, the GPU ladder, module locks, module details, the desktop appearance, and the settings history."
 author: "Lauren Olinger"
 created: "2026-09-04"
 
@@ -48,8 +52,10 @@ runtime:
   estimated_time: "interactive"
 
 notes: |
-  voyagertools/views.py is the blueprint (page, fragment, JSON API of the
-  eight tools); order_tool.py, clean_workbench.py, clean_manual_edit.py,
+  voyagertools/views.py is the blueprint (page, fragment with ?tool=panel
+  for the atlas, JSON API of the eight tools); static/vt_settings.js holds
+  the settings, desktop and history panes, which call the desktop's own
+  /api/settings routes (vicarius_ui_os/settings_views.py); order_tool.py, clean_workbench.py, clean_manual_edit.py,
   rewind.py and camera_tool.py hold the tool logic; scripts/rewind_chunk.py
   runs under metashape -r to drop a chunk (with --fake for tests).
   voyagertools/paramsstore.py is the only reader and writer of the

@@ -7,7 +7,7 @@
 # list. min and max are inclusive unless min_exclusive or max_exclusive is
 # true. hidden keys are kept in the file and never shown in the editor.
 # Read by voyagertools/paramsstore.py (validate_values) and by the editors of
-# the Voyager 1 setup page and Voyager tools.
+# the Voyager 1 setup page and the Atlas control panel.
 
 phase: voyager1
 template_version: v1.0.0

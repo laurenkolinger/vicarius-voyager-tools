@@ -81,7 +81,9 @@ class Pure(unittest.TestCase):
 
     def test_actor(self):
         self.assertEqual(cme.actor("lo"), "voyager_tools:LO")
-        for bad in ("", "L O", "LO;x", "a" * 9):
+        self.assertEqual(cme.actor(" abcd "), "voyager_tools:ABCD")
+        # Two to four letters, the registry's MANUAL_EDIT_INITIALS_PATTERN (program C milestone C3).
+        for bad in ("", "L O", "LO;x", "a" * 9, "L", "L0", "ABCDE", "12"):
             with self.assertRaises(ValueError):
                 cme.actor(bad)
         with self.assertRaises(TypeError):

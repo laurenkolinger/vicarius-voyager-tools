@@ -1,13 +1,24 @@
-/* static/voyager_tools.js - the Voyager tools fragment (program spec section 7),
- * converted to the design language of docs/superpowers/specs/2026-09-02-
- * workflow-page-design.md and 2026-09-02-matrix-window-design.md.
+/* static/voyager_tools.js - the Atlas control panel fragment (module
+ * voyager_tools; program spec section 7 and program C spec section 5.3),
+ * in the design language of docs/superpowers/specs/2026-09-02-workflow-
+ * page-design.md and 2026-09-02-matrix-window-design.md.
  *
- * One IIFE exporting window.VoyagerTools = { mount(el) }. mount() takes the
+ * One IIFE extending window.VoyagerTools with mount(el, opts),
+ * mountPanel(el, opts) and registerPane(key, init). mount() takes the
  * <section class="voyager-tools"> root (or a container holding it), guards a
  * double mount with data-vt-mounted, injects the scoped stylesheet when the
- * page did not link it, and wires the eight tools. Every request goes to
- * BASE + '/api/...' where BASE is data-vt-base on the root, or
- * window.VOYAGER_TOOLS_BASE, or '/voyager-tools'. A 401 or 403 carrying
+ * page did not link it, wires the eight tools, initialises every pane a
+ * later script registered (static/vt_settings.js: the settings, desktop and
+ * history panes), opens opts.pane or the remembered pane, and returns a
+ * handle whose unmount() stops the panes and frees the section for another
+ * mount. mountPanel() is the atlas's entry (its Control panel tab): the
+ * same mount plus a Back to the board button on the relocked admin line.
+ * A pane script that loads before this one queues its registrations on
+ * window.VoyagerTools._pendingPanes, drained here. Every tool request goes
+ * to BASE + '/api/...' where BASE is data-vt-base on the root, or
+ * window.VOYAGER_TOOLS_BASE, or '/voyager-tools'; a pane's request with
+ * desktop: true goes to the desktop's own route (/api/settings/...) as
+ * written. A 401 or 403 carrying
  * need_unlock, or a relock from window.VICADMINSESSION (the desktop's admin
  * session script, decision 8 of the manual edit chain), hides the tools
  * behind the admin line with an Unlock admin button, and the next unlock
@@ -51,15 +62,43 @@
 
   var DEFAULT_BASE = "/voyager-tools";
   var CSS_NAME = "voyager_tools.css";
+  // The shared design block and the state-role sheet: the standalone page and
+  // the atlas link both; the desktop links neither, so the panel injects the
+  // role sheet as a link and the shared block scoped under its root class.
+  var SHARED_CSS = "vicarius_workflow.css";
+  var ROLES_CSS = "vicarius_roles.css";
+  var ROOT_CLASS = "voyager-tools";
   var LS_TAB = "vt.tab";
   var LS_INITIALS = "vt.initials";
   var SS_INITIALS = "vic_initials";
-  var INITIALS_RE = /^[A-Za-z0-9]{1,8}$/;
-  var TOOLS = ["order", "workbench", "manual", "rewind", "spot", "prompts", "params", "seasons"];
+  // Two to four letters after trimming and upper-casing: the registry's
+  // MANUAL_EDIT_INITIALS_PATTERN, the one initials rule of the chain.
+  var INITIALS_RE = /^[A-Z]{2,4}$/;
+  var PANE_KEY_RE = /^[a-z][a-z0-9_]{0,31}$/;
   var TARGET_WORDS = { before_step1: "before step 1", before_step0: "before step 0" };
   var GB = 1e9;
   var REQUEST_TIMEOUT_MS = 30000;
-  var LINE_ADMIN_OFF = "Admin mode is off. Unlock admin to use Voyager tools.";
+  var LINE_ADMIN_OFF = "Admin mode is off. Unlock admin to use the Atlas control panel.";
+  var LINE_INITIALS = "Type your initials, two to four letters, at the top of the panel.";
+  var LINE_LOCKED = "The Atlas control panel is locked.";
+  var LINE_PANE_MISSING = "The script of this pane did not load; reload the window.";
+
+  /* ---- the pane seam (program C spec 5.3) ------------------------------- */
+  // PANES: key -> init(ctx), filled by registerPane from later scripts.
+  // instances: every mounted panel, so a pane registered after a mount is
+  // initialised in it at once.
+  var PANES = {};
+  var instances = [];
+
+  // registerPane(key, init): make a pane available to every panel. init(ctx)
+  // runs once per mount and returns the pane's loader (called when the pane
+  // is first shown, and again after a relock ends).
+  function registerPane(key, init) {
+    if (typeof key !== "string" || !PANE_KEY_RE.test(key)) throw new Error("registerPane: the pane key must be a short lowercase name, got " + key);
+    if (typeof init !== "function") throw new Error("registerPane: the initialiser of pane " + key + " must be a function");
+    PANES[key] = init;
+    instances.forEach(function (inst) { inst.initPane(key); });
+  }
   var LINE_TIMEOUT = "No answer from the desktop after 30 s; the action may still have happened. Reload the pane before trying again.";
 
   function adminSession() { return window.VICADMINSESSION || null; }
@@ -135,11 +174,17 @@
 
   /* ---- mount ------------------------------------------------------------ */
 
-  function mount(el) {
+  var NO_HANDLE = { unmount: function () { /* nothing was mounted */ } };
+
+  // mount(el, opts): wire the panel in el. opts.pane opens that pane first
+  // (else the remembered one, else Atlas edit); opts.onClose, when given,
+  // adds Back to the board to the relocked admin line. Returns {unmount()}.
+  function mount(el, opts) {
+    var options = opts || {};
     var root = el && el.classList && el.classList.contains("voyager-tools") ? el
       : (el ? el.querySelector(".voyager-tools") : null);
-    if (!root || root.getAttribute("data-vt-mounted") === "1") return;
-    if (root.getAttribute("data-admin-required") === "1") return; // the admin body, nothing to wire
+    if (!root || root.getAttribute("data-vt-mounted") === "1") return NO_HANDLE;
+    if (root.getAttribute("data-admin-required") === "1") return NO_HANDLE; // the admin body, nothing to wire
     root.setAttribute("data-vt-mounted", "1");
     var BASE = root.getAttribute("data-vt-base") || window.VOYAGER_TOOLS_BASE || DEFAULT_BASE;
     ensureStylesheet(BASE, root.getAttribute("data-vt-version") || "");
@@ -152,6 +197,7 @@
     /* -- fetch ------------------------------------------------------------ */
     function api(path, options) {
       var opts = options || {};
+      var url = opts.desktop ? path : BASE + path;
       var init = { method: opts.method || "GET", headers: { Accept: "application/json" }, credentials: "same-origin" };
       if (opts.body !== undefined) {
         init.headers["Content-Type"] = "application/json";
@@ -163,14 +209,14 @@
         init.signal = controller.signal;
         timer = setTimeout(function () { controller.abort(); }, REQUEST_TIMEOUT_MS);
       }
-      return fetch(BASE + path, init).then(function (r) {
+      return fetch(url, init).then(function (r) {
         return r.json().catch(function () { return {}; }).then(function (data) {
           if (isLockedAnswer(r.status, data)) {
             var session = adminSession();
             if (session) session.noteResponse(r.status, data);
             showRelocked();
           } else if (r.status === 423) {
-            showAdminLine(data.message || "Voyager tools is locked.");
+            showAdminLine(data.message || LINE_LOCKED);
           }
           return { ok: r.ok, status: r.status, data: data };
         });
@@ -199,6 +245,7 @@
       var line = q(root, "admin-line");
       var stages = root.querySelector(".vt-stages");
       if (stages) stages.hidden = true;
+      if (!relocked) stopPanes();
       relocked = true;
       if (!line) return;
       line.textContent = "";
@@ -214,6 +261,15 @@
         btn.addEventListener("click", function () { adminSession().promptUnlock(); });
         line.appendChild(btn);
       }
+      if (typeof options.onClose === "function") {
+        var back = document.createElement("button");
+        back.type = "button";
+        back.className = "btn btn-mini";
+        back.setAttribute("data-vt", "admin-back");
+        back.textContent = "Back to the board";
+        back.addEventListener("click", function () { options.onClose(); });
+        line.appendChild(back);
+      }
       line.hidden = false;
     }
 
@@ -226,11 +282,12 @@
       if (stages) stages.hidden = false;
       showAdminLine("");
       state.loaded = {};
-      showTool(readStore(LS_TAB) || TOOLS[0]);
+      showTool(readStore(LS_TAB) || toolKeys()[0]);
     }
 
+    var stopWatching = null;
     if (adminSession()) {
-      var stopWatching = adminSession().onChange(function (change) {
+      stopWatching = adminSession().onChange(function (change) {
         if (!document.body.contains(root)) { stopWatching(); return; }
         if (!change.unlocked) showRelocked();
         else if (relocked) showUnlocked();
@@ -265,7 +322,7 @@
     function initials(resEl) {
       var v = initialsEl ? initialsEl.value.trim().toUpperCase() : "";
       if (!INITIALS_RE.test(v)) {
-        setResult(resEl, "Type your initials (one to eight letters or digits) at the top of the page first.", "error");
+        setResult(resEl, LINE_INITIALS, "error");
         if (initialsEl) initialsEl.focus();
         return null;
       }
@@ -325,15 +382,68 @@
       });
     }
 
-    /* -- tabs (the left list of eight tools) -------------------------------- */
+    /* -- tabs (the grouped pane list) ---------------------------------------- */
     var tabs = qa(root, ".vt-tab");
+    var current = null;
+    // toolKeys(): every pane key the list offers, in list order.
+    function toolKeys() { return tabs.map(function (t) { return t.getAttribute("data-vt-tab"); }); }
     function showTool(name) {
-      if (TOOLS.indexOf(name) === -1) name = TOOLS[0];
+      var keys = toolKeys();
+      if (keys.indexOf(name) === -1) name = keys[0];
+      current = name;
       tabs.forEach(function (t) { t.setAttribute("aria-selected", t.getAttribute("data-vt-tab") === name ? "true" : "false"); });
       qa(root, ".vt-pane").forEach(function (p) { p.hidden = p.getAttribute("data-vt-pane") !== name; });
       writeStore(LS_TAB, name);
-      if (!state.loaded[name]) { state.loaded[name] = true; loaders[name](); }
+      loadPane(name);
     }
+    // loadPane(name): run a pane's loader the first time it is shown; a
+    // registered pane whose script has not arrived yet waits for it.
+    function loadPane(name) {
+      if (state.loaded[name]) return;
+      var loader = loaders[name] || paneLoaders[name];
+      if (!loader) {
+        if (!PANES[name]) {
+          var line = root.querySelector('#vt-' + name + ' .result');
+          if (line) setResult(line, LINE_PANE_MISSING, "error");
+        }
+        return;
+      }
+      state.loaded[name] = true;
+      loader();
+    }
+
+    /* -- registered panes ------------------------------------------------------ */
+    var paneLoaders = {};
+    var stopFns = [];
+    // stopPanes(): run every stop function a pane registered (its timers and
+    // listeners outside the section), on a relock and at unmount.
+    function stopPanes() {
+      var fns = stopFns.splice(0, stopFns.length);
+      fns.forEach(function (fn) { try { fn(); } catch (e) { /* a pane's own cleanup failed; the rest still run */ } });
+    }
+    function paneContext(key) {
+      return {
+        root: root, pane: root.querySelector("#vt-" + key), base: BASE, key: key,
+        api: api,
+        desktopApi: function (path, options) { return api(path, Object.assign({}, options || {}, { desktop: true })); },
+        initials: initials, confirmDialog: confirmDialog, setResult: setResult, busy: busy, fail: fail,
+        esc: esc, q: function (name) { return q(root, name); }, qa: function (sel) { return qa(root, sel); },
+        idChip: idChip, stampWords: stampWords,
+        onStop: function (fn) { if (typeof fn === "function") stopFns.push(fn); },
+        isRelocked: function () { return relocked; },
+        isShown: function () { return current === key && !relocked; }
+      };
+    }
+    var instance = {
+      initPane: function (key) {
+        if (paneLoaders[key] || loaders[key] || !PANES[key] || !root.querySelector("#vt-" + key)) return;
+        var made = PANES[key](paneContext(key));
+        paneLoaders[key] = typeof made === "function" ? made : (made && typeof made.load === "function" ? made.load : function () {});
+        var line = root.querySelector("#vt-" + key + " .result");
+        if (line && line.textContent === LINE_PANE_MISSING) setResult(line, "");
+        if (current === key) loadPane(key);
+      }
+    };
     tabs.forEach(function (t) {
       t.addEventListener("click", function () { showTool(t.getAttribute("data-vt-tab")); });
       t.addEventListener("keydown", function (e) {
@@ -931,7 +1041,11 @@
     function loadParams() {
       var phase = pmPhase.value;
       return api("/api/params?phase=" + encodeURIComponent(phase)).then(function (res) {
-        if (!res.ok) { fail(pmResult, res); pmBody.innerHTML = ""; pmEditor.innerHTML = ""; return; }
+        var schemaChip = q(root, "pm-schema-chip");
+        if (!res.ok) { fail(pmResult, res); pmBody.innerHTML = ""; pmEditor.innerHTML = ""; if (schemaChip) schemaChip.hidden = true; return; }
+        // A phase with no editor schema yet (Voyager 2 until program D ships
+        // params_schema_voyager2.yaml) is edited through the YAML box only.
+        if (schemaChip) schemaChip.hidden = !!res.data.schema;
         state.params = res.data;
         renderParamsList(res.data);
         loadRef(res.data.default.ref, res.data.default);
@@ -1176,24 +1290,125 @@
       manual: loadManual, rewind: rewindUi.load, spot: spotUi.load, prompts: loadPrompts, params: loadParams, seasons: loadSeasons
     };
 
+    instances.push(instance);
+    Object.keys(PANES).forEach(instance.initPane);
+
     api("/api/state").then(function (res) {
       if (!res.ok) return;
       var stamp = q(root, "stamp");
       if (stamp) stamp.textContent = "Read " + String(res.data.now || "").replace("T", " ").slice(0, 16) + " AST";
     });
-    showTool(readStore(LS_TAB) || TOOLS[0]);
+    showTool(options.pane || readStore(LS_TAB) || toolKeys()[0]);
+
+    // unmount(): stop every pane, drop the admin subscription, and swap the
+    // section for a clean copy with no listeners, so the container can be
+    // mounted again. A caller keeps the container, not the section.
+    return {
+      unmount: function () {
+        stopPanes();
+        if (stopWatching) { stopWatching(); stopWatching = null; }
+        var at = instances.indexOf(instance);
+        if (at !== -1) instances.splice(at, 1);
+        var fresh = root.cloneNode(true);
+        fresh.removeAttribute("data-vt-mounted");
+        qa(fresh, ".vt-dialog-backdrop").forEach(function (d) { d.parentNode.removeChild(d); });
+        var stages = fresh.querySelector(".vt-stages");
+        if (stages) stages.hidden = false;
+        var line = q(fresh, "admin-line");
+        if (line) { line.textContent = ""; line.hidden = true; }
+        if (root.parentNode) root.parentNode.replaceChild(fresh, root);
+      }
+    };
   }
 
+  // mountPanel(el, opts): the atlas's entry (opts = {onClose, pane}); the
+  // panel mount with Back to the board on the relocked admin line.
+  function mountPanel(el, opts) {
+    var options = opts || {};
+    return mount(el, { pane: options.pane, onClose: options.onClose });
+  }
+
+  function hasStylesheet(name) { return !!document.querySelector('link[href*="' + name + '"]'); }
+
+  // ensureStylesheet(base, version): the panel's own sheet, then the role
+  // sheet and the scoped shared block before it, each once per document.
   function ensureStylesheet(base, version) {
-    if (document.querySelector('link[data-vt-css="1"]')) return;
-    var link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = base + "/static/" + CSS_NAME + (version ? "?v=" + version : "");
-    link.setAttribute("data-vt-css", "1");
-    document.head.appendChild(link);
+    var suffix = version ? "?v=" + version : "";
+    var link = document.querySelector('link[data-vt-css="1"]');
+    if (!link) {
+      link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = base + "/static/" + CSS_NAME + suffix;
+      link.setAttribute("data-vt-css", "1");
+      document.head.appendChild(link);
+    }
+    if (!hasStylesheet(ROLES_CSS)) {
+      var roles = document.createElement("link");
+      roles.rel = "stylesheet";
+      roles.href = base + "/static/" + ROLES_CSS + suffix;
+      document.head.insertBefore(roles, link);
+    }
+    if (hasStylesheet(SHARED_CSS) || document.querySelector('style[data-scoped-shared="voyager-tools"]')) return;
+    var style = document.createElement("style");
+    style.setAttribute("data-scoped-shared", ROOT_CLASS);
+    document.head.insertBefore(style, link);
+    fetch(base + "/static/" + SHARED_CSS + suffix, { credentials: "same-origin" })
+      .then(function (response) { return response.ok ? response.text() : ""; })
+      .then(function (text) { style.textContent = scopeCss(text, "." + ROOT_CLASS); },
+            function () { /* the panel's own sheet carries the token fallbacks */ });
   }
 
-  window.VoyagerTools = { mount: mount };
+  // scopeCss(text, scope): every selector of a stylesheet prefixed with
+  // scope. ":root" becomes the scope itself, html and body rules stay with the
+  // host page and are dropped, "*" becomes "scope *", ".bubble" (appended to
+  // body by the tooltip script) stays global, at-rules holding rules (media,
+  // supports, container, layer) are recursed and every other at-rule passes
+  // through. The same rule as window.ManualEdit.scopeCss.
+  function scopeCss(text, scope) {
+    return scopeRules(String(text || "").replace(/\/\*[\s\S]*?\*\//g, ""), scope);
+  }
+  function scopeRules(src, scope) {
+    var out = [];
+    var pos = 0;
+    while (pos < src.length) {
+      var open = src.indexOf("{", pos);
+      if (open < 0) break;
+      var head = src.slice(pos, open).trim();
+      var close = matchingBrace(src, open);
+      var body = src.slice(open + 1, close);
+      if (head.charAt(0) === "@") {
+        if (/^@(media|supports|container|layer)\b/.test(head)) out.push(head + "{" + scopeRules(body, scope) + "}");
+        else out.push(head + "{" + body + "}");
+      } else if (head) {
+        var selectors = head.split(",").map(function (sel) { return scopeSelector(sel.trim(), scope); }).filter(Boolean);
+        if (selectors.length) out.push(selectors.join(",") + "{" + body + "}");
+      }
+      pos = close + 1;
+    }
+    return out.join("\n");
+  }
+  function matchingBrace(src, open) {
+    var depth = 0;
+    for (var i = open; i < src.length; i++) {
+      if (src.charAt(i) === "{") depth += 1;
+      else if (src.charAt(i) === "}") { depth -= 1; if (depth === 0) return i; }
+    }
+    return src.length;
+  }
+  function scopeSelector(selector, scope) {
+    if (!selector) return "";
+    if (selector === ":root") return scope;
+    if (selector === "html" || selector === "body") return "";
+    if (selector === "*") return scope + " *";
+    if (selector.indexOf(".bubble") === 0) return selector;
+    return scope + " " + selector;
+  }
+
+  var pending = (window.VoyagerTools && window.VoyagerTools._pendingPanes) || [];
+  window.VoyagerTools = Object.assign(window.VoyagerTools || {}, {
+    mount: mount, mountPanel: mountPanel, registerPane: registerPane, scopeCss: scopeCss, _pendingPanes: []
+  });
+  pending.forEach(function (entry) { registerPane(entry[0], entry[1]); });
 
   // Standalone page: mount the root the template rendered.
   if (document.readyState === "loading") {

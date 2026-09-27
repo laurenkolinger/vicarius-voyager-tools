@@ -1,9 +1,12 @@
 {#
   File:    templates/voyager_tools/panel.html
-  Purpose: The Voyager tools fragment (program spec section 7, converted to
-           the design language of docs/superpowers/specs/2026-09-02-workflow
-           -page-design.md and 2026-09-02-matrix-window-design.md): a left
-           list of the eight tools and one pane each. Var-free: the desktop
+  Purpose: The Atlas control panel fragment (module voyager_tools; program
+           spec section 7, program C spec section 5.3, in the design language
+           of docs/superpowers/specs/2026-09-02-workflow-page-design.md and
+           2026-09-02-matrix-window-design.md): a grouped list of panes at the
+           left (Records, Manual edit, Voyager, Desktop, History) and one pane
+           each. The eight tools live here; the settings and desktop panes are
+           in panes_settings.html, filled by static/vt_settings.js. Var-free: the desktop
            window and the standalone page include the same markup, and
            static/voyager_tools.js fills every list from the JSON API under
            data-vt-base. The root <section class="voyager-tools"> is what
@@ -17,33 +20,47 @@
            vicarius_roles.css; every other rule is page-specific, scoped
            under .voyager-tools in static/voyager_tools.css.
 #}
-<section class="voyager-tools" id="vt-root" data-vt-base="/voyager-tools" data-vt-version="20260927b">
+<section class="voyager-tools" id="vt-root" data-vt-base="/voyager-tools" data-vt-version="20260927c">
 
   <header class="head">
-    <h1 class="title" id="vt-title">Voyager tools</h1>
-    <button type="button" class="tip" aria-label="About Voyager tools" title="Voyager tools is the admin page of the Voyager program, one tool per tab at the left. VICARIUS signs every write here voyager_tools:&lt;initials&gt; in the registry events."><span>i</span></button>
+    <h1 class="title" id="vt-title">Atlas control panel</h1>
+    <button type="button" class="tip" aria-label="About the Atlas control panel" title="The Atlas control panel holds the restricted settings and tools of the atlas, the Voyager runs, the manual edit and the desktop, one pane per entry in the pane list. VICARIUS signs every registry write voyager_tools:&lt;initials&gt; and every settings change in the settings history."><span>i</span></button>
     <span data-admin-chip-slot></span>
   </header>
 
   <dl class="choices vt-header-choices">
     <div>
       <dt><label for="vt-initials">Your initials</label>
-          <button type="button" class="tip" aria-label="About your initials" title="Type the initials every save is signed with. VICARIUS writes them as voyager_tools:&lt;initials&gt; into the registry events, the job history and the voyagerparams commits, and remembers them in this browser."><span>?</span></button></dt>
-      <dd><input type="text" id="vt-initials" class="w-initials" maxlength="8" autocomplete="off" spellcheck="false"></dd>
+          <button type="button" class="tip" aria-label="About your initials" title="Type the two to four letters every save is signed with. VICARIUS writes them into the registry events, the job history, the voyagerparams commits and the settings history, and remembers them in this browser."><span>?</span></button></dt>
+      <dd><input type="text" id="vt-initials" class="w-initials" maxlength="4" autocomplete="off" spellcheck="false"></dd>
     </div>
   </dl>
   <p class="result result-error" data-vt="admin-line" hidden></p>
 
-  <section class="stages vt-stages" aria-label="Voyager tools">
-    <nav class="vt-nav" role="tablist" aria-label="Tools" aria-orientation="vertical">
+  <section class="stages vt-stages" aria-label="Atlas control panel">
+    <nav class="vt-nav" role="tablist" aria-label="Panes" aria-orientation="vertical">
+      <p class="vt-nav-group" role="presentation">Records</p>
       <button type="button" class="vt-tab" role="tab" data-vt-tab="order" aria-controls="vt-order" aria-selected="true" title="Show the processing order table: reorder the transects Voyager 1 has not started, save the order, and lock it in.">Atlas edit</button>
-      <button type="button" class="vt-tab" role="tab" data-vt-tab="workbench" aria-controls="vt-workbench" aria-selected="false" title="Show every processing folder left on the Workbench with its Shelf comparison, and delete the copies that match.">Clean workbench</button>
-      <button type="button" class="vt-tab" role="tab" data-vt-tab="manual" aria-controls="vt-manual" aria-selected="false" title="Show every unfinished manual edit project and cancel one that went wrong.">Clean manual edit run</button>
-      <button type="button" class="vt-tab" role="tab" data-vt-tab="rewind" aria-controls="vt-rewind" aria-selected="false" title="Take one timepoint back to before step 1 or before step 0, after a dry run lists what would change.">Rewind</button>
-      <button type="button" class="vt-tab" role="tab" data-vt-tab="spot" aria-controls="vt-spot" aria-selected="false" title="Rewind one timepoint to before step 1 and mark it for another Voyager 1 run.">Spot redo</button>
-      <button type="button" class="vt-tab" role="tab" data-vt-tab="prompts" aria-controls="vt-prompts" aria-selected="false" title="Show the back-of-house guide to cataloguing a season and the prompts to give an agent.">Prompts doc</button>
-      <button type="button" class="vt-tab" role="tab" data-vt-tab="params" aria-controls="vt-params" aria-selected="false" title="Show every parameter version and branch in voyagerparams, edit the values, and save a branch or a new default.">Parameter defaults</button>
       <button type="button" class="vt-tab" role="tab" data-vt-tab="seasons" aria-controls="vt-seasons" aria-selected="false" title="Show the camera model, preprocessing and notes recorded for every season, and edit them.">Camera model</button>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="prompts" aria-controls="vt-prompts" aria-selected="false" title="Show the back-of-house guide to cataloguing a season and the prompts to give an agent.">Prompts doc</button>
+      <p class="vt-nav-group" role="presentation">Manual edit</p>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="settings" aria-controls="vt-settings" aria-selected="false" title="Show the manual edit limits, the markers per chunk, the edit bench default and the open and close logging, and change them.">Manual edit settings</button>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="shelf" aria-controls="vt-shelf" aria-selected="false" title="Show whether an upload archives or overwrites the Shelf copy of a transect, and change it.">Shelf copy</button>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="manual" aria-controls="vt-manual" aria-selected="false" title="Show every unfinished manual edit project and cancel one that went wrong.">Clean manual edit run</button>
+      <p class="vt-nav-group" role="presentation">Voyager</p>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="runs" aria-controls="vt-runs" aria-selected="false" title="Show the switches in front of real Voyager 1 and Voyager 2 batches and the Workbench removal defaults, and change them.">Voyager runs</button>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="params" aria-controls="vt-params" aria-selected="false" title="Show every parameter version and branch in voyagerparams, edit the values, and save a branch or a new default.">Parameter defaults</button>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="rewind" aria-controls="vt-rewind" aria-selected="false" title="Show the rewind: take one timepoint back to before step 1 or before step 0, after a dry run lists what would change.">Rewind</button>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="spot" aria-controls="vt-spot" aria-selected="false" title="Show the spot redo: rewind one timepoint to before step 1 and mark it for another Voyager 1 run.">Spot redo</button>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="workbench" aria-controls="vt-workbench" aria-selected="false" title="Show every processing folder left on the Workbench with its Shelf comparison, and delete the copies that match.">Clean workbench</button>
+      <p class="vt-nav-group" role="presentation">Desktop</p>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="locks" aria-controls="vt-locks" aria-selected="false" title="Show which modules are locked for everyone.">Module locks</button>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="modules" aria-controls="vt-modules" aria-selected="false" title="Show every module's display name, category and status, and open the Module Menu that edits them.">Module details</button>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="appearance" aria-controls="vt-appearance" aria-selected="false" title="Show the desktop's skin, grid, effects and background colour, and open the Admin window that changes them.">Appearance</button>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="floors" aria-controls="vt-floors" aria-selected="false" title="Show the free space every copy to the Workbench, the edit bench and the Shelf must leave, and change it.">Space floors</button>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="gpu" aria-controls="vt-gpu" aria-selected="false" title="Show the GPU right-of-way ladder and the claims holding the cards now.">GPU ladder</button>
+      <p class="vt-nav-group" role="presentation">History</p>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="history" aria-controls="vt-history" aria-selected="false" title="Show every settings change, newest first, with who made it, when and why.">Settings history</button>
     </nav>
 
     <div class="vt-panes">
@@ -182,6 +199,7 @@
             <dd><select id="vt-pm-phase" class="vt-field" data-vt="pm-phase"><option value="voyager1">Voyager 1</option><option value="voyager2">Voyager 2</option></select></dd>
           </div>
         </dl>
+        <p class="vt-line vt-state" data-vt="pm-schema-chip" hidden><span class="chip role-planned" aria-hidden="true"></span>Voyager 2 does not read these defaults yet</p>
         <ul class="rows" data-vt="pm-body"></ul>
         <p class="count vt-line" data-vt="pm-loaded"></p>
         <form class="vt-editor" data-vt="pm-editor" autocomplete="off"></form>
@@ -230,11 +248,14 @@
         <p class="result" data-vt="se-result" role="status"></p>
       </section>
 
+      {# 9 to 17. The settings, desktop and history panes (program C milestone C3) #}
+      {% include "voyager_tools/panes_settings.html" %}
+
     </div>
   </section>
 
   <footer class="foot">
     <span class="stamp" data-vt="stamp"></span>
-    <span>Voyager tools - built by Lauren Olinger</span>
+    <span>Atlas control panel - built by Lauren Olinger</span>
   </footer>
 </section>
