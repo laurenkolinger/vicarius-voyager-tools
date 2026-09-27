@@ -37,6 +37,8 @@ HOST = "146.226.147.140"
 SHELF_PARENT = "/volume6/Archive8_12TB/driver_deposits/run1"
 RID = "MRS_T1_2023ann"
 FOLDER = "MRS_T1_3D"  # the one processing folder of MRS T1, named for site and transect alone
+# When a phase an older job file carries was entered (a fixed AST time).
+LEGACY_PHASE_AT = "2026-09-20T10:00:00-04:00"
 
 
 class Pure(unittest.TestCase):
@@ -180,19 +182,24 @@ class WithStores(unittest.TestCase):
         importlib.reload(registry)
 
     def advance(self, *phases):
-        """Walk the job through phases; reaching certified marks every project done, passes the checks
-        gate and calls certify() (jobstore.transition refuses "certified" directly: only certify() may
-        record the statement, and certify() refuses while any project is unfinished)."""
+        """Walk the job through phases as LO.
+
+        The moves a job still makes (pulling, editing) go through
+        jobstore.transition. The job-wide checks, certify, push and verify
+        phases, and done, are ones jobstore now only reads from an older job
+        file (RETIRED_PHASES; no move reaches done until Finish project), so
+        they are written into the record the way such a file carries them.
+        """
+        live = (jobstore.PULLING, jobstore.EDITING)
         for phase in phases:
-            if phase == "certified":
-                job_id = self.job["job_id"]
-                for psx in self.store.load_job(job_id)["projects"]:
-                    self.store.set_project_state(job_id, psx, jobstore.PROJECT_DONE, "LO")
-                self.store.transition(job_id, "checking", "LO")
-                self.store.finish_checks(job_id, {"verdict": "pass", "items": [], "by_psx": {}}, "LO")
-                self.store.certify(job_id, "LO", "reviewed and certified for testing")
+            reason = "test" if phase.startswith(jobstore.FAILED_PREFIX) else ""
+            if phase in live:
+                self.store.transition(self.job["job_id"], phase, "LO", reason=reason)
                 continue
-            self.store.transition(self.job["job_id"], phase, "LO", reason="test" if phase.startswith("failed_") else "")
+            record = self.store.load_job(self.job["job_id"])
+            record["phase"] = phase
+            record["phase_history"].append({"phase": phase, "at": LEGACY_PHASE_AT, "by": "LO", "reason": reason})
+            self.store.save_job(record)
 
     def test_cancel_before_pushing_prunes_and_restores(self):
         self.advance("pulling", "editing")
