@@ -45,7 +45,10 @@ T3 = ["LBH_T3_2024ann", "LBH_T3_2025_pbl"]
 T4 = ["LBH_T4_2024ann"]
 PSX = {"T1": "MRS_T1_2023_2024.psx", "T2": "MRS_T2_2023_2024.psx", "T3": "LBH_T3_2024_2025.psx",
        "T4": "LBH_T4_2024_2025.psx"}
-STATES = rq.QueueStates(review="review", restarting="restarting", upload="upload")
+# The manual edit job store's own rules, so the queue and program B's dossier are proven to agree.
+JOBSTORE = views._jobstore_module()
+RULES = rq.QueueRules(stopped=JOBSTORE.restart_stopped, returnable=JOBSTORE.can_return_to_review)
+SHELF = "/volume6/Archive8_12TB/driver_deposits/TCRMP_run"
 SITE_NAMES = {"LBH": "Lang Bank Red Hind FSA"}
 ERROR = ("VICARIUS could not read the free space of 146.226.147.140:/volume6 (ssh gave no answer in 60 s), "
          "so nothing was copied.")
@@ -57,7 +60,8 @@ def job_rows(ids, psx, site_name=""):
     for rid in ids:
         site, transect = rid.split("_")[:2]
         out.append({"readable_id": rid, "site": site, "site_name": site_name, "transect": transect,
-                    "processing_folder": f"{site}_{transect}_3D", "psx_basename": psx})
+                    "processing_folder": f"{site}_{transect}_3D", "shelf_location": f"{SHELF}/{site}_{transect}_3D",
+                    "psx_basename": psx})
     return out
 
 
@@ -95,7 +99,7 @@ def rows(review=(), others=()):
 def queue(registry_rows, records):
     """queue_items with the test vocabulary and site table."""
     return rq.queue_items(registry_rows, records, lambda code: SITE_NAMES.get(code, ""), sort_key=str,
-                          status_review="review", states=STATES)
+                          status_review="review", rules=RULES)
 
 
 class QueueItems(unittest.TestCase):
@@ -185,16 +189,27 @@ class QueueItems(unittest.TestCase):
 
     def test_wrong_types_are_refused(self):
         with self.assertRaises(TypeError):
-            rq.queue_items("rows", [], str, sort_key=str, status_review="review", states=STATES)
+            rq.queue_items("rows", [], str, sort_key=str, status_review="review", rules=RULES)
         with self.assertRaises(TypeError):
-            rq.queue_items([], {"a": 1}, str, sort_key=str, status_review="review", states=STATES)
+            rq.queue_items([], {"a": 1}, str, sort_key=str, status_review="review", rules=RULES)
 
 
 class TransectOf(unittest.TestCase):
     def test_the_transect_of_a_job_and_psx(self):
         got = rq.transect_of(jobs()[1], PSX["T3"], lambda code: SITE_NAMES.get(code, ""), sort_key=str)
         self.assertEqual(got, {"psx": PSX["T3"], "processing_folder": "LBH_T3_3D", "site": "LBH",
-                               "site_name": "Lang Bank Red Hind FSA", "transect": "T3", "readable_ids": sorted(T3)})
+                               "site_name": "Lang Bank Red Hind FSA", "transect": "T3", "readable_ids": sorted(T3),
+                               "shelf_location": f"{SHELF}/LBH_T3_3D"})
+
+    def test_the_shelf_folder_is_the_first_row_that_names_one(self):
+        job = jobs()[1]
+        for row in job["rows"]:
+            if row["psx_basename"] == PSX["T3"]:
+                row["shelf_location"] = ""
+        job["rows"][-2]["shelf_location"] = "   "
+        self.assertEqual(rq.transect_of(job, PSX["T3"], str, sort_key=str)["shelf_location"], "")
+        job["rows"][1]["shelf_location"] = f"{SHELF}/LBH_T3_3D"
+        self.assertEqual(rq.transect_of(job, PSX["T3"], str, sort_key=str)["shelf_location"], f"{SHELF}/LBH_T3_3D")
 
     def test_a_psx_the_job_does_not_hold(self):
         self.assertIsNone(rq.transect_of(jobs()[1], PSX["T2"], str, sort_key=str))
@@ -262,15 +277,27 @@ class Route(unittest.TestCase):
         self.assertEqual(body["read_at"], "2026-09-27T10:00:00-04:00")
         self.assertEqual(self.recovered, [2])
 
-    def test_an_unreadable_store_answers_500_with_its_sentence(self):
+    def test_an_unreadable_store_answers_500_naming_the_project_not_its_path(self):
         self.unlock()
 
         def broken():
-            raise ValueError("ME-20260925-100000-CC.json does not parse")
+            raise JOBSTORE.CorruptJobError("the job record ME-20260925-100000-CC at /mnt/rip/x/manual_edit/jobs/"
+                                           "ME-20260925-100000-CC.json is corrupt: projects is not an object")
         views.deps.active_jobs = broken
         r = self.client.get("/voyager-tools/api/review/queue")
         self.assertEqual(r.status_code, 500)
-        self.assertIn("does not parse", r.get_json()["error"])
+        self.assertEqual(r.get_json()["error"], "The manual edit project ME-20260925-100000-CC cannot be read, so the "
+                                                "Review queue lists nothing; open Clean manual edit run to see it.")
+
+    def test_an_unreadable_store_with_no_project_id_keeps_its_own_sentence(self):
+        self.unlock()
+
+        def broken():
+            raise OSError("Permission denied: '/mnt/rip/x/manual_edit/jobs'")
+        views.deps.active_jobs = broken
+        r = self.client.get("/voyager-tools/api/review/queue")
+        self.assertEqual(r.status_code, 500)
+        self.assertIn("The manual edit job files cannot be read: Permission denied", r.get_json()["error"])
 
     def test_the_route_is_read_only(self):
         self.unlock()

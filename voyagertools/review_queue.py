@@ -9,17 +9,17 @@ Purpose: The Review queue of the Atlas control panel (program C spec
              manual_edit_status is review (program A's rule, the one the
              atlas's own queue uses); the job record supplies the project,
              the round, the editor, the confirmation time and the check counts;
-           - stopped_restarts: every transect whose state is restarting with a
-             recorded error (a start over that stopped), for Resume start over;
-           - marked_for_upload: every transect marked for upload that no
-             upload set holds and whose Shelf copy is not verified yet, the
-             ones an admin may still move back to admin review (ruling O3 of
-             the chain decisions);
+           - stopped_restarts: every transect whose start over stopped (state
+             restarting with a recorded error), for Resume start over;
+           - marked_for_upload: every transect an admin may still move back
+             to admin review (marked for upload, no upload set holds it, its
+             Shelf copy not verified yet; ruling O3 of the chain decisions);
            - unmatched: every registry row in review that no unfinished
              project holds.
 Inputs:  registry rows (dicts), job records (dicts), a site name lookup, the
-         registry's sort key and the status and state words of the libraries
-         that own them (passed in by the route, never copied here).
+         registry's sort key, the registry's review status and the two
+         transect rules of the manual edit job store (restart_stopped and
+         can_return_to_review), passed in by the route, never copied here.
 Outputs: one dict; nothing is written.
 """
 from __future__ import annotations
@@ -36,12 +36,11 @@ LEVEL_WARN = "warn"   # a warned check
 NO_TIME = "~"         # sorts after every ISO stamp, so an unconfirmed transect comes last
 
 
-class QueueStates(NamedTuple):
-    """The transect states the queue reads, from the manual edit job store (jobstore.PROJECT_*)."""
+class QueueRules(NamedTuple):
+    """The manual edit job store's transect rules the queue applies (project dict -> bool)."""
 
-    review: str
-    restarting: str
-    upload: str
+    stopped: Callable[[Mapping], bool]      # jobstore.restart_stopped: a start over that stopped
+    returnable: Callable[[Mapping], bool]   # jobstore.can_return_to_review: may go back to admin review
 
 
 # --- helpers -----------------------------------------------------------------
@@ -104,18 +103,15 @@ def _stopped(job: Mapping, transect: Mapping, project: Mapping) -> dict:
                 error=_text(restart.get("error")), at=_text(restart.get("at")))
 
 
-def _returnable(project: Mapping, states: QueueStates) -> bool:
-    """Whether a transect marked for upload can still go back to admin review (no set holds it, not verified)."""
-    return (project.get("state") == states.upload and not project.get("upload_id")
-            and not project.get("upload_verified"))
-
-
-def _stopped_restart(project: Mapping, states: QueueStates) -> bool:
-    """Whether a start over stopped: state restarting with a recorded error."""
-    return project.get("state") == states.restarting and bool(_text(_mapping(project.get("restart")).get("error")))
-
-
 # --- public ------------------------------------------------------------------
+
+def _shelf_location(job: Mapping, psx: str) -> str:
+    """The Shelf folder of the transect `psx`: the first of its job rows that names one, else ""."""
+    rows = job.get("rows") if isinstance(job.get("rows"), list) else []
+    return next((_text(row.get("shelf_location")) for row in rows
+                 if isinstance(row, Mapping) and _text(row.get("psx_basename")) == psx
+                 and _text(row.get("shelf_location"))), "")
+
 
 def transect_of(job: Mapping, psx: str, site_name_fn: Callable[[str], str], sort_key: Callable = str) -> dict | None:
     """The transect `psx` of one job record, or None when the job holds no such psx.
@@ -127,13 +123,16 @@ def transect_of(job: Mapping, psx: str, site_name_fn: Callable[[str], str], sort
         sort_key: the registry's readable id sort key.
 
     Returns:
-        {psx, processing_folder, site, site_name, transect, readable_ids}.
+        {psx, processing_folder, site, site_name, transect, readable_ids,
+        shelf_location}, shelf_location being the Shelf folder a Start over
+        pulls the fresh copy from ("" when no row names one).
     """
-    return next((t for t in timelines.transects_of(job, sort_key, site_name_fn) if t["psx"] == psx), None)
+    transect = next((t for t in timelines.transects_of(job, sort_key, site_name_fn) if t["psx"] == psx), None)
+    return None if transect is None else dict(transect, shelf_location=_shelf_location(job, psx))
 
 
 def queue_items(rows: Iterable[Mapping], jobs: list, site_name_fn: Callable[[str], str], *,
-                sort_key: Callable = str, status_review: str, states: QueueStates) -> dict:
+                sort_key: Callable = str, status_review: str, rules: QueueRules) -> dict:
     """The Review queue (spec 4.10) without its read time.
 
     Parameters:
@@ -142,7 +141,7 @@ def queue_items(rows: Iterable[Mapping], jobs: list, site_name_fn: Callable[[str
         site_name_fn: site code to full name ("" when the site table has none).
         sort_key: the registry's readable id sort key.
         status_review: the registry status of a transect in admin review (registry.ME_REVIEW).
-        states: the transect states of the job store.
+        rules: the job store's transect rules.
 
     Returns:
         {items, stopped_restarts, marked_for_upload, unmatched}: items oldest
@@ -155,7 +154,7 @@ def queue_items(rows: Iterable[Mapping], jobs: list, site_name_fn: Callable[[str
     Example:
         queue_items(registry.load(), store.active_jobs(strict=True), site_name,
                     sort_key=registry.sort_key, status_review=registry.ME_REVIEW,
-                    states=QueueStates(jobstore.PROJECT_REVIEW, jobstore.PROJECT_RESTARTING, jobstore.PROJECT_UPLOAD))
+                    rules=QueueRules(jobstore.restart_stopped, jobstore.can_return_to_review))
     """
     if not isinstance(rows, (list, tuple)):
         raise TypeError("queue_items needs the registry rows as a list.")
@@ -171,9 +170,9 @@ def queue_items(rows: Iterable[Mapping], jobs: list, site_name_fn: Callable[[str
             project = _mapping(projects.get(transect["psx"]))
             if in_review.intersection(transect["readable_ids"]):
                 items.append(_item(job, transect, project))
-            if _stopped_restart(project, states):
+            if rules.stopped(project):
                 stopped.append(_stopped(job, transect, project))
-            if _returnable(project, states):
+            if rules.returnable(project):
                 returnable.append(dict(_transect_base(job, transect, project), editor=_editor(job, project)))
     items.sort(key=lambda item: (item["confirmed_at"] or NO_TIME, item["job_id"], item["psx"]))
     return {"items": items, "stopped_restarts": stopped, "marked_for_upload": returnable,

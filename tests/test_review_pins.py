@@ -28,6 +28,9 @@ from pathlib import Path
 
 CLONE = Path(__file__).resolve().parent.parent
 REVIEW_JS = CLONE / "static" / "vt_review.js"
+TIMELINES_JS = CLONE / "static" / "vt_timelines.js"
+PANEL_CSS = CLONE / "static" / "voyager_tools.css"
+ROLES_CSS = CLONE / "static" / "vicarius_roles.css"
 NODE = shutil.which("node")
 DASHES = ("–", "—")
 BANNED_WORD = re.compile(r"\bland(s|ed|ing)?\b", re.IGNORECASE)
@@ -74,6 +77,8 @@ class Helpers(unittest.TestCase):
                                             "start_upload": False})
         self.assertIs(cases[11]["body"]["start_upload"], False)
         self.assertEqual(cases[5]["line"], "Type your initials, two to four letters, for example LO.")
+        panel_line = run_node("return h.LINES.initialsPanel;")
+        self.assertEqual(panel_line, "Type your initials, two to four letters, at the top of the panel.")
         self.assertEqual(cases[1]["line"], "Write the admin report before recording a decision.")
         self.assertEqual(cases[3]["line"], "Write the instructions to the editor for a send back or a start over.")
         for case in cases[1:11] + cases[12:]:
@@ -119,15 +124,92 @@ class Helpers(unittest.TestCase):
                                  "defaults (no settings file).")
         self.assertEqual(out[2:], ["", ""])
 
-    def test_the_start_over_confirmation_names_no_placeholder(self):
-        out = run_node("""return [h.restartConfirmText({processing_folder: "MRS_T2_3D",
-                                                        on_bench: {path: "/bench/MRS_T2_3D"}}, false),
-                                  h.restartConfirmText({processing_folder: "MRS_T2_3D", restart: {stage: "aside", aside: ""}}, true),
-                                  h.restartConfirmText({processing_folder: "MRS_T2_3D", restart: "bad"}, true)];""")
+    def test_the_start_over_confirmation_names_the_bench_and_the_shelf_folder(self):
+        out = run_node("""var shelf = "/volume6/Archive8_12TB/driver_deposits/TCRMP_run/MRS_T2_3D";
+          return [h.restartConfirmText({processing_folder: "MRS_T2_3D", on_bench: {path: "/bench/MRS_T2_3D"}}, false, shelf),
+                  h.restartConfirmText({processing_folder: "MRS_T2_3D", on_bench: {path: "/bench/MRS_T2_3D"}}, false, "  "),
+                  h.restartConfirmText({processing_folder: "MRS_T2_3D", restart: {stage: "aside", aside: ""}}, true, shelf),
+                  h.restartConfirmText({processing_folder: "MRS_T2_3D", restart: "bad"}, true)];""")
         self.assertEqual(out[0], "VICARIUS moves /bench/MRS_T2_3D aside as MRS_T2_3D_restart_ followed by the date "
-                                 "and time of the move, and pulls a fresh copy from the Shelf.")
-        self.assertEqual(out[1], "VICARIUS resumes the start over of MRS_T2_3D from the move aside.")
-        self.assertEqual(out[2], "VICARIUS resumes the start over of MRS_T2_3D from the stage it reached.")
+                                 "and time of the move, and pulls a fresh copy from "
+                                 "/volume6/Archive8_12TB/driver_deposits/TCRMP_run/MRS_T2_3D.")
+        self.assertTrue(out[1].endswith("and pulls a fresh copy from the Shelf."), out[1])
+        self.assertEqual(out[2], "VICARIUS resumes the start over of MRS_T2_3D from the move aside.")
+        self.assertEqual(out[3], "VICARIUS resumes the start over of MRS_T2_3D from the stage it reached.")
+
+    def test_the_resume_line_and_the_texts_a_resume_posts_again(self):
+        out = run_node("""return {
+          line: [h.resumeLine({restart: {stage: "pulling", error: "The copy from the Shelf stopped: No space left on device."}}),
+                 h.resumeLine({restart: {stage: "space", error: "ssh gave no answer in 60 s"}}),
+                 h.resumeLine({restart: {stage: "odd", error: ""}}), h.resumeLine({restart: null})],
+          kept: h.resumeTexts([
+              {kind: "admin_review", decision: "return", source_id: "J:P:review:r0", text: "old report"},
+              {kind: "admin_review", decision: "restart", source_id: "J:P:review:r1", text: "Start again."},
+              {kind: "return_instructions", decision: "restart", source_id: "J:P:review:r1", text: "Re-place markers."},
+              {kind: "return_instructions", decision: "return", source_id: "J:P:review:r0", text: "old"}]),
+          noInstructions: h.resumeTexts([{kind: "admin_review", decision: "restart", source_id: "S", text: "x"}]),
+          wrongSource: h.resumeTexts([{kind: "admin_review", decision: "restart", source_id: "S", text: "x"},
+                                      {kind: "return_instructions", decision: "restart", source_id: "T", text: "y"}]),
+          blank: h.resumeTexts([{kind: "admin_review", decision: "restart", source_id: "S", text: "  "},
+                                {kind: "return_instructions", decision: "restart", source_id: "S", text: "y"}]),
+          none: [h.resumeTexts([]), h.resumeTexts(null), h.resumeTexts("x")]
+        };""")
+        self.assertEqual(out["line"], [
+            "The start over stopped at the pull of the fresh copy. The copy from the Shelf stopped: No space left on device.",
+            "The start over stopped at the free space check. Ssh gave no answer in 60 s.",
+            "The start over stopped at a stage not recorded.",
+            "The start over stopped at a stage not recorded."])
+        for line in out["line"]:
+            self.assertNotIn(": The", line.split(". ", 1)[0])
+        self.assertEqual(out["kept"], {"report": "Start again.", "instructions": "Re-place markers."})
+        self.assertEqual([out["noInstructions"], out["wrongSource"], out["blank"]], [None, None, None])
+        self.assertEqual(out["none"], [None, None, None])
+
+    def test_the_head_reads_a_stopped_start_over_as_stopped(self):
+        out = run_node("""return [
+          h.stateBadge({state: "restarting", restart: {stage: "pulling", error: "No space left on device."}}),
+          h.stateBadge({state: "restarting", restart: {stage: "pulling", error: ""}}),
+          h.stateBadge({state: "review"}), h.stateBadge({state: "upload"}), h.stateBadge({state: "done"}),
+          h.stateBadge({state: "odd"}), h.stateBadge(null)];""")
+        self.assertEqual(out[0], {"role": "role-failed", "words": "start over stopped at the pull of the fresh copy"})
+        self.assertEqual(out[1], {"role": "stage-bench", "words": "starting over"})
+        self.assertEqual(out[2], {"role": "stage-review", "words": "admin review"})
+        self.assertEqual(out[3], {"role": "stage-upload", "words": "marked for upload"})
+        self.assertEqual(out[4], {"role": "stage-edited", "words": "uploaded"})
+        self.assertEqual(out[5], {"role": "role-empty", "words": "odd"})
+        self.assertEqual(out[6], {"role": "role-empty", "words": "state not recorded"})
+
+    def test_state_chips_match_the_atlas_and_the_timelines_pane(self):
+        review = run_node("return h.STATE_ROLES;")
+        timelines = json.loads(subprocess.run(
+            [NODE, "-e", "const t = require(" + json.dumps(str(TIMELINES_JS)) + ");"
+             "const s = ['todo','editing','review','upload','uploading','restarting','done'];"
+             "const o = {}; s.forEach(function (k) { o[k] = t.stateRole(k); });"
+             "process.stdout.write(JSON.stringify(o));"], capture_output=True, text=True, timeout=30).stdout)
+        self.assertEqual(review, timelines)
+        self.assertEqual(review, {"todo": "stage-bench", "editing": "stage-bench", "review": "stage-review",
+                                  "upload": "stage-upload", "uploading": "stage-upload", "restarting": "stage-bench",
+                                  "done": "stage-edited"})
+        self.assertEqual(run_node("return h.LEVEL_ROLES;"),
+                         {"ok": "check-passed", "warn": "role-attention", "stop": "role-failed"})
+        roles = ROLES_CSS.read_text(encoding="utf-8")
+        for cls in ("stage-bench", "stage-review", "stage-upload", "stage-edited"):
+            self.assertIn(".chip." + cls + " {", roles, cls)
+        self.assertIn("--stage-review: #A56BFF;", roles)
+        self.assertIn(".chip.check-passed {", PANEL_CSS.read_text(encoding="utf-8"))
+
+    def test_a_server_error_with_no_sentence_reads_as_spec_section_8(self):
+        out = run_node("""return [
+          h.refusalText({status: 502, body: {}}, "VICARIUS could not record the decision: "),
+          h.refusalText({status: 500, body: {error: "The registry could not be read."}}, "x: "),
+          h.refusalText({status: 409, body: {message: "MRS_T2 is starting over."}}, "x: "),
+          h.refusalText({status: 404, body: {}}, "VICARIUS could not open Metashape: "),
+          h.refusalText({status: 0, body: {}}, "x: "), h.refusalText({status: 0, timedOut: true}, "x: ")];""")
+        self.assertEqual(out[0], "The desktop answered 502; nothing on this pane changed.")
+        self.assertEqual(out[1:4], ["The registry could not be read.", "MRS_T2 is starting over.",
+                                    "VICARIUS could not open Metashape: the desktop answered 404."])
+        self.assertEqual(out[4], "The request did not reach the desktop; nothing was changed.")
+        self.assertTrue(out[5].startswith("No answer from the desktop after 30 s"))
 
     def test_state_times_from_program_a_intervals(self):
         out = run_node("""
@@ -139,13 +221,19 @@ class Helpers(unittest.TestCase):
                   h.stateTimes(ivs, ["MRS_T9_2023ann", "MRS_T2_2024ann"]),
                   h.stateTimes({"A": [{value: "upload", seconds: 5, open: true}]}, ["A"]),
                   h.stateTimes(null, ["A"]), h.stateTimes({"A": "bad"}, ["A"]),
-                  h.stateTimes({"A": [null, {value: "editing", seconds: "x"}]}, ["A"])];""")
+                  h.stateTimes({"A": [null, {value: "editing", seconds: "x"}]}, ["A"]),
+                  h.stateTimes({"A": [], "B": [{value: "editing", seconds: 7200}]}, ["A", "B"]),
+                  h.stateTimes({"A": [null], "B": [{value: "review", seconds: 60, open: true}]}, ["A", "B"]),
+                  h.stateTimes({"A": [], "B": []}, ["A", "B"])];""")
         self.assertEqual(out[0], {"editing_s": 5400, "review_open_s": 7200})
         self.assertEqual(out[1], {"editing_s": 99, "review_open_s": None})
-        self.assertEqual(out[2], {"editing_s": 0, "review_open_s": None})
+        self.assertEqual(out[2], {"editing_s": None, "review_open_s": None}, "no editing interval reads unknown")
         self.assertEqual(out[3], {"editing_s": None, "review_open_s": None})
         self.assertEqual(out[4], {"editing_s": None, "review_open_s": None})
         self.assertEqual(out[5], {"editing_s": 0, "review_open_s": None})
+        self.assertEqual(out[6], {"editing_s": 7200, "review_open_s": None}, "an empty first list never hides the next")
+        self.assertEqual(out[7], {"editing_s": None, "review_open_s": 60})
+        self.assertEqual(out[8], {"editing_s": None, "review_open_s": None})
 
     def test_notes_are_grouped_by_round_with_each_earlier_outcome(self):
         out = run_node("""return [h.roundGroups([
@@ -215,7 +303,7 @@ class SourceGuards(unittest.TestCase):
                 self.assertFalse(text.startswith("You"), text)
                 self.assertTrue(text.endswith("."), text)
                 self.assertLessEqual(text.count(". ") + 1, 2, text)
-                for banned in ("above", "this tab", "this window", "this pane"):
+                for banned in ("above", "below", "under the list", "this tab", "this window", "this pane"):
                     self.assertNotIn(banned, text.lower())
         lines = js[js.index("var LINES = {"):js.index("};", js.index("var LINES = {"))]
         for text in re.findall(r'"([^"]{12,})"', lines):

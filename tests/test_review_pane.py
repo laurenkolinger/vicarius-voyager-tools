@@ -46,6 +46,8 @@ PSX = "MRS_T2_2023_2024.psx"
 PROJECT = f"/manual-edit/api/jobs/{JOB}/projects/{PSX}"
 IDS = ["MRS_T2_2023ann", "MRS_T2_2024ann"]
 BENCH = "/mnt/rip/driver_staging/editbench/MRS_T2_3D"
+SHELF = "/volume6/Archive8_12TB/driver_deposits/TCRMP_run/MRS_T2_3D"
+MANUAL_EDIT_VERSION = "me-test-version"
 SETTINGS = {"scale_error_max_mm": 4.94, "scale_error_max_percent": 0.66, "align_spread_max_mm": 8.65,
             "saved_at": "2026-09-26T21:54:25-04:00", "saved_by": "LO"}
 DOSSIER = {
@@ -151,8 +153,9 @@ class ReviewCase(PanesCase):
         app.register_blueprint(views.voyager_tools_bp)
         with app.test_request_context():
             self.fragment = render_template(
-                "voyager_tools/review.html", base=views.URL_PREFIX, v=views.ASSET_VERSION, job_id=JOB, psx=PSX,
-                processing_folder="MRS_T2_3D", site="MRS", site_name="", transect="T2", readable_ids=IDS).strip()
+                "voyager_tools/review.html", base=views.URL_PREFIX, v=views.ASSET_VERSION,
+                manual_edit_version=MANUAL_EDIT_VERSION, job_id=JOB, psx=PSX, processing_folder="MRS_T2_3D",
+                shelf_location=SHELF, site="MRS", site_name="", transect="T2", readable_ids=IDS).strip()
 
     def routes(self, **overrides) -> dict:
         routes = self.base_routes()
@@ -207,7 +210,23 @@ class SidecarReview(ReviewCase):
         }).map(function (el) { return el.outerHTML.slice(0, 60); });
         check(results, 'tooltips', untipped.length === 0, untipped.join(' | '));
         check(results, 'two_reads', calls('GET', PROJECT + '/dossier').length === 1 && calls('GET', '/voyager-tools/api/timelines/detail').length === 1);
-        """.replace("__BENCH__", BENCH)
+        check(results, 'head_chip_is_the_matrix_violet', !!part('state').querySelector('.chip.stage-review'), part('state').innerHTML);
+        var passed = qa('.vt-review-check-head .chip').filter(function (c) { return c.parentNode.textContent.indexOf('passed') !== -1; });
+        check(results, 'passed_is_green', passed.length === 2 && passed.every(function (c) { return c.classList.contains('check-passed'); }) &&
+              getComputedStyle(passed[0]).backgroundColor === 'rgb(0, 255, 179)', passed.length ? getComputedStyle(passed[0]).backgroundColor : 'none');
+        check(results, 'no_violet_role', !host.querySelector('.role-verified'));
+        check(results, 'violet_chip_colour', getComputedStyle(part('state').querySelector('.chip')).backgroundColor === 'rgb(165, 107, 255)',
+              getComputedStyle(part('state').querySelector('.chip')).backgroundColor);
+        check(results, 'current_round_heading', qa('.vt-review-round-head').length === 2 &&
+              qa('.vt-review-round-head')[0].textContent === 'Edit round 2', qa('.vt-review-round-head').map(function (h) { return h.textContent; }).join(' | '));
+        var admin = qa('.vt-review-kind.is-admin').map(function (k) { return k.textContent; });
+        check(results, 'admin_kinds_tinted', JSON.stringify(admin) === '["Admin review","Instructions to the editor"]', JSON.stringify(admin));
+        var glyphs = qa('.vt-review .tip').map(function (g) { return g.getAttribute('aria-label'); });
+        check(results, 'notes_glyph_has_no_count', glyphs.indexOf('About notes') !== -1 && glyphs.every(function (g) { return !/\d/.test(g); }), glyphs.join(' | '));
+        check(results, 'next_step_label', q('[data-review-row="decision"] dt').textContent.indexOf('Next step') === 0 &&
+              glyphs.indexOf('About the next step') !== -1 && glyphs.indexOf('About decision') !== -1);
+        check(results, 'shelf_attr', q('.vt-review').getAttribute('data-shelf-location') === '__SHELF__');
+        """.replace("__BENCH__", BENCH).replace("__SHELF__", SHELF)
         self.run_review("rv_record", steps)
 
     def test_local_validation_posts_nothing(self):
@@ -234,6 +253,9 @@ class SidecarReview(ReviewCase):
         await mountFresh();
         choose('upload'); fill('Looks right.', '', 'lo');
         fld('start_upload').click();
+        var versions = [];
+        var realOpen = VoyagerTools.openUploadWindow;
+        VoyagerTools.openUploadWindow = function (id, o) { versions.push(o.version); return realOpen(id, o); };
         act('record').click(); act('record').click();
         check(results, 'decided', await waitFor(function () { return window.__DECISIONS__.length === 1; }), line());
         var p = posts('/review');
@@ -247,13 +269,15 @@ class SidecarReview(ReviewCase):
         check(results, 'window', await waitFor(function () { return window.__MOUNTS__.length === 1; }) &&
               window.__MOUNTS__[0].uploadId === 'UP-20260927-103100-LO' && window.__MOUNTS__[0].initials === 'LO', JSON.stringify(window.__MOUNTS__));
         check(results, 'window_on_body', q('.vt-upload-layer') && q('.vt-upload-layer').parentNode === document.body);
+        check(results, 'manual_edit_cache_bust', JSON.stringify(versions) === '["__MEV__"]', JSON.stringify(versions));
+        check(results, 'uploading_chip', !!part('state').querySelector('.chip.stage-upload'));
         check(results, 'closed_form', act('record').disabled && act('open').disabled && fld('report').disabled);
         check(results, 'state_chip', part('state').textContent === 'uploading to the Shelf', part('state').textContent);
         check(results, 'line', /^Marked for upload by LO at \d{4}-\d{2}-\d{2} \d{2}:\d{2} AST\.$/.test(line()), line());
         check(results, 'remembered', localStorage.getItem('vt.initials') === 'LO');
         act('close').click();
         check(results, 'close', window.__CLOSED__ === 1);
-        """
+        """.replace("__MEV__", MANUAL_EDIT_VERSION)
         self.run_review("rv_upload", steps, routes)
 
     def test_send_back_and_start_over(self):
@@ -276,13 +300,15 @@ class SidecarReview(ReviewCase):
         var confirm = part('confirm');
         check(results, 'asks_first', posts('/review').length === 0 && confirm && !confirm.hidden);
         check(results, 'names_aside', confirm.textContent.indexOf('__BENCH__') !== -1 && confirm.textContent.indexOf('MRS_T2_3D_restart_') !== -1, confirm.textContent);
+        check(results, 'names_shelf', confirm.textContent.indexOf('pulls a fresh copy from __SHELF__.') !== -1, confirm.textContent);
+        check(results, 'one_action_while_asking', act('record').disabled === true && act('restart-confirm').disabled === false);
         act('restart-cancel').click();
-        check(results, 'cancel', part('confirm').hidden);
+        check(results, 'cancel', part('confirm').hidden && act('record').disabled === false);
         act('record').click(); act('restart-confirm').click();
         check(results, 'restarted', await waitFor(function () { return window.__DECISIONS__.length === 2; }), line());
         check(results, 'restart_body', posts('/review')[0].body.decision === 'restart');
         check(results, 'restart_chip', part('state').textContent === 'starting over', part('state').textContent);
-        """.replace("__BENCH__", BENCH)
+        """.replace("__BENCH__", BENCH).replace("__SHELF__", SHELF)
         self.run_review("rv_return_restart", steps, routes)
 
     def test_stale_conflict_and_reread_error(self):
@@ -310,6 +336,10 @@ class SidecarReview(ReviewCase):
         check(results, 'reread_error', await waitFor(function () { return part('line').classList.contains('result-error') &&
               line().indexOf('ME-x') !== -1; }), line());
         check(results, 'record_works_after', act('record').disabled === false);
+        setDossier([{ body: { dossier: __DOSSIER__ } }]);
+        window.__ROUTES__['POST ' + PROJECT + '/review'] = [{ status: 502, body: {} }];
+        act('record').click();
+        check(results, 'bare_5xx', await waitFor(function () { return line() === 'The desktop answered 502; nothing on this pane changed.'; }), line());
         """.replace("__STALE__", js(stale)).replace("__DOSSIER__", js(DOSSIER))
         self.run_review("rv_stale", steps)
 
@@ -391,6 +421,7 @@ class SidecarReview(ReviewCase):
         self.run_review("rv_states", steps)
 
     def test_a_stopped_start_over_offers_only_the_resume(self):
+        """With the first Start over's texts missing from the notes (its registry write failed), the admin types them."""
         stopped = dossier(state="restarting", decisions=["restart"],
                           restart={"at": "2026-09-27T10:15:00-04:00", "by": "LO", "stage": "pulling",
                                    "aside": BENCH + "_restart_20260927-101500",
@@ -404,8 +435,10 @@ class SidecarReview(ReviewCase):
         check(results, 'resume_button', act('record').textContent === 'Resume start over' && act('record').disabled === false);
         check(results, 'instructions_shown', !q('[data-review-row="instructions"]').hidden && q('[data-review-row="start_upload"]').hidden);
         var status = part('decision').textContent;
-        check(results, 'why', status.indexOf('stopped at the pull of the fresh copy: The pull stopped: the edit bench is full.') !== -1 &&
-              status.indexOf('keeps the ones written with the first Start over') !== -1, status);
+        check(results, 'why', status.indexOf('The start over stopped at the pull of the fresh copy. The pull stopped: the edit bench is full.') !== -1 &&
+              status.indexOf('The first Start over did not reach the notes; write the report and instructions again.') !== -1, status);
+        check(results, 'head_reads_stopped', part('state').textContent === 'start over stopped at the pull of the fresh copy' &&
+              !!part('state').querySelector('.chip.role-failed'), part('state').innerHTML);
         fill('Resume.', 'Redo the crop.', 'LO');
         act('record').click();
         var confirm = part('confirm');
@@ -413,8 +446,39 @@ class SidecarReview(ReviewCase):
               confirm.textContent.indexOf('MRS_T2_3D_restart_20260927-101500') !== -1 && act('restart-confirm').textContent === 'Resume now', confirm.textContent);
         act('restart-confirm').click();
         check(results, 'posted', await waitFor(function () { return posts('/review').length === 1; }) && posts('/review')[0].body.decision === 'restart');
+        check(results, 'typed_texts', posts('/review')[0].body.report === 'Resume.' && posts('/review')[0].body.instructions === 'Redo the crop.');
         """
         self.run_review("rv_resume", steps, routes)
+
+    def test_a_resume_posts_the_first_start_over_texts_from_the_notes(self):
+        notes = DOSSIER["notes"] + [
+            {"note_id": "N4", "group_id": "G4", "round": 1, "kind": "admin_review", "rule": "", "decision": "restart",
+             "source_id": f"{JOB}:{PSX}:review:r1:2", "text": "Start again from the Shelf.", "by": "LO",
+             "at": "2026-09-27T10:14:00-04:00"},
+            {"note_id": "N5", "group_id": "G5", "round": 1, "kind": "return_instructions", "rule": "",
+             "decision": "restart", "source_id": f"{JOB}:{PSX}:review:r1:2", "text": "Redo the crop.", "by": "LO",
+             "at": "2026-09-27T10:14:00-04:00"}]
+        stopped = dossier(state="restarting", decisions=["restart"], notes=notes,
+                          restart={"at": "2026-09-27T10:15:00-04:00", "by": "LO", "stage": "space", "aside": "",
+                                   "error": "VICARIUS could not read the free space of the NAS, so nothing was copied."})
+        routes = self.routes()
+        routes["GET " + PROJECT + "/dossier"] = [{"body": {"dossier": stopped}}]
+        routes["POST " + PROJECT + "/review"] = [{"status": 202, "body": {"job": {}}}]
+        steps = r"""
+        await mountFresh();
+        check(results, 'no_text_fields', !fld('report') && !fld('instructions'));
+        var status = part('decision').textContent;
+        check(results, 'kept_line', status.indexOf('VICARIUS resumes with the report and instructions written at the first Start over.') !== -1 &&
+              status.indexOf('The start over stopped at the free space check. VICARIUS could not read the free space') !== -1, status);
+        act('record').click();
+        check(results, 'asks', !part('confirm').hidden && part('confirm').textContent.indexOf('from the free space check') !== -1);
+        act('restart-confirm').click();
+        check(results, 'posted', await waitFor(function () { return posts('/review').length === 1; }));
+        var b = posts('/review')[0].body;
+        check(results, 'first_texts', b.decision === 'restart' && b.report === 'Start again from the Shelf.' &&
+              b.instructions === 'Redo the crop.' && b.initials === 'LO', JSON.stringify(b));
+        """
+        self.run_review("rv_resume_kept", steps, routes)
 
     def test_a_malformed_record_still_renders_and_an_upload_error_says_why(self):
         bad = {"state": "review", "round": "x", "checks": "garbage", "scale_check": {"chunks": "no"}, "align": [],
@@ -495,7 +559,9 @@ class QueuePane(ReviewCase):
               !vt('review-stopped').querySelector('b'), stopped);
         check(results, 'returnable', !vt('review-returnable-wrap').hidden && vt('review-returnable').textContent.indexOf('Marked for upload') !== -1);
         check(results, 'unmatched', vt('review-unmatched').textContent === 'MRS_T3_2023ann reads review in the registry, but no unfinished manual edit project holds it; correct the cell in the atlas table.', vt('review-unmatched').textContent);
-        check(results, 'tips', openButtons().every(function (b) { return (b.getAttribute('title') || '').indexOf('Open the review') === 0; }));
+        check(results, 'tips', openButtons().every(function (b) { return (b.getAttribute('title') || '').indexOf("Open this transect's checks") === 0; }));
+        check(results, 'row_chips', !!vt('review-items').querySelector('.chip.stage-review') && !!vt('review-returnable').querySelector('.chip.stage-upload') &&
+              !!vt('review-stopped').querySelector('.chip.role-failed') && !q('#vt-review .role-planned, #vt-review .role-attention'));
         openButtons()[0].click();
         check(results, 'mounted', await waitFor(function () { return area().querySelector('[data-review-part="decision"]'); }), area().textContent);
         check(results, 'fragment_url', calls('GET', '/voyager-tools/fragment?tool=review&job=' + JOB + '&psx=' + PSX).length === 1);
@@ -503,6 +569,12 @@ class QueuePane(ReviewCase):
         check(results, 'selected', q('#vt-review .row[aria-current="true"]') !== null);
         check(results, 'head', area().querySelector('[data-vt-review-of="MRS T2"]').textContent === 'Admin review');
         choose('upload'); setInput(fld('report'), 'Looks right.');
+        var panelInitials = q('#vt-initials');
+        setInput(panelInitials, '');
+        act('record').click();
+        check(results, 'panel_initials_line', line() === 'Type your initials, two to four letters, at the top of the panel.' &&
+              document.activeElement === panelInitials && posts('/review').length === 0, line());
+        setInput(panelInitials, 'LO');
         var before = calls('GET', '/voyager-tools/api/review/queue').length;
         act('record').click();
         check(results, 'recorded', await waitFor(function () { return posts('/review').length === 1 && act('close'); }), line());

@@ -5,7 +5,7 @@
  * the result line, the row lists and the footer are the shared block
  * (vicarius_workflow.css, linked by the standalone page and injected scoped
  * by voyager_tools.js when a host page has not linked it); the state-role
- * chips are vicarius_roles.css. Tokens are read by their shared names with
+ * chips and the manual edit stage chips are vicarius_roles.css. Tokens are read by their shared names with
  * the design's literal values as fallbacks
  * (docs/superpowers/specs/2026-09-02-workflow-page-design.md section 2).
  * This file carries only what the shared block does not: the grouped pane
@@ -612,6 +612,20 @@
 .voyager-tools .vt-review-area-head .btn { margin-left: auto; }
 .voyager-tools #vt-review .row[aria-current="true"] { box-shadow: inset 2px 0 0 var(--magenta, #E20074); background: rgba(226, 0, 116, 0.06); }
 .voyager-tools #vt-review .row-state .count { font-size: 12px; }
+/* Queue rows: the name wraps whole (the psx chip keeps its year span at 440 px),
+   and the state words read in the body type, as the review head's do. */
+.voyager-tools #vt-review .row-name { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.voyager-tools #vt-review .row-state { flex-wrap: wrap; font: 400 13px/1.4 var(--font-body, 'Inter', ui-sans-serif, sans-serif); }
+/* A passed check: a green swatch (the shared --success token), never the admin review violet. */
+.voyager-tools .chip.check-passed {
+  display: inline-block; box-sizing: border-box; width: 12px; height: 12px; padding: 0; margin: 0;
+  border-radius: var(--radius, 2px); vertical-align: middle; flex: none;
+  background: var(--success, #00FFB3); border: 1px solid var(--success, #00FFB3);
+}
+/* The note kinds an admin writes carry the admin review stage colour, as the atlas drawer's do. */
+.voyager-tools .vt-review-kind.is-admin { color: var(--stage-review, #A56BFF); }
+/* Once a decision records the form is disabled; the options not chosen fade so the chosen one still reads. */
+.voyager-tools .vt-review-choices .opt:has(input:disabled:not(:checked)) { opacity: 0.4; }
 @container (max-width: 479px) {
   .voyager-tools .vt-review-choices { grid-template-columns: minmax(0, 1fr); }
   .voyager-tools .vt-review-choices dt { min-height: 0; padding-bottom: 0; }

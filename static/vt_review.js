@@ -27,14 +27,18 @@
  * Send back with instructions, Start over), Start the upload now (only with
  * Mark for upload), the instructions (only for the other two) and one
  * Record decision button; a stopped start over offers only Resume start
- * over; a transect marked for upload that no upload set holds offers Back
- * to admin review (ruling O3). Start over asks first, naming the bench
- * folder that moves aside. Before posting a decision the record is read
+ * over, which posts the report and instructions the first Start over wrote
+ * to the notes; a transect marked for upload that no upload set holds offers
+ * Back to admin review (ruling O3). Start over asks first, naming the bench
+ * folder that moves aside and the Shelf folder the fresh copy comes from
+ * (the section's data-shelf-location). Before posting a decision the record is read
  * again and nothing is posted when the round or the state changed. A
  * recorded decision shows one result line, moves the state chip, closes
  * the form and Open in Metashape, calls opts.onDecision({decision, job_id,
  * psx, upload_id}), and opens an upload it started in the panel's upload
- * window (VoyagerTools.openUploadWindow, static/vt_uploads.js). A refusal
+ * window (VoyagerTools.openUploadWindow, static/vt_uploads.js, cache-busted
+ * with the section's data-manual-edit-version). State chips use the atlas
+ * matrix's stage colours (static/vicarius_roles.css). A refusal
  * carrying need_unlock goes to the admin session and shows the relock line
  * with Unlock; the typed report and instructions are kept for this page
  * load and come back when the record is read again.
@@ -74,6 +78,9 @@
   var STATUS_EDITING = "editing";       // registry manual_edit_status values in program A's intervals
   var STATUS_REVIEW = "review";
   var KIND_ADMIN_REVIEW = "admin_review";
+  var KIND_RETURN_INSTRUCTIONS = "return_instructions";
+  // The note kinds an admin writes, tinted with the admin review stage colour as the atlas drawer tints them.
+  var ADMIN_KINDS = ["admin_review", "return_instructions", "restart"];
   var SECONDS_PER_MINUTE = 60;
   var SECONDS_PER_HOUR = 3600;
   var SECONDS_PER_DAY = 86400;
@@ -82,6 +89,7 @@
   var HTTP_OK = 200;
   var HTTP_ACCEPTED = 202;
   var HTTP_CONFLICT = 409;
+  var HTTP_SERVER_ERROR = 500;
   var HTTP_UNAVAILABLE = 503;
   // B's start over moves the bench folder aside as <folder>_restart_<YYYYMMDD-HHMMSS> (jobstore.RESTART_ASIDE_MARK).
   var RESTART_ASIDE_MARK = "_restart_";
@@ -95,13 +103,18 @@
   var RESTART_STAGE_WORDS = { space: "the free space check", aside: "the move aside",
                               pulling: "the pull of the fresh copy", verified: "the verify of the fresh copy" };
   var LEVEL_WORDS = { ok: "passed", warn: "warned", stop: "failed" };
-  var LEVEL_ROLES = { ok: "role-verified", warn: "role-attention", stop: "role-failed" };
+  // A passed check is green, never the admin review violet (static/voyager_tools.css .chip.check-passed).
+  var LEVEL_ROLES = { ok: "check-passed", warn: "role-attention", stop: "role-failed" };
   var STATE_WORDS = { todo: "not started", editing: "on the edit bench", review: "admin review",
                       upload: "marked for upload", uploading: "uploading to the Shelf",
                       restarting: "starting over", done: "uploaded" };
-  // The Timelines pane's roles for the same states (static/vt_timelines.js).
-  var STATE_ROLES = { todo: "role-empty", editing: "role-in-progress", review: "role-attention", upload: "role-planned",
-                      uploading: "role-in-progress", restarting: "role-in-progress", done: "role-verified" };
+  // The chip of each transect state: the atlas matrix colour of the registry status that state
+  // writes (manualedit.jobstore.REGISTRY_STATUS_OF_STATE), from the shared stage chips of
+  // static/vicarius_roles.css, so the review reads in the colours of the matrix beside it.
+  // static/vt_timelines.js uses the same map (tests/test_review_pins.py compares them).
+  var STATE_ROLES = { todo: "stage-bench", editing: "stage-bench", review: "stage-review", upload: "stage-upload",
+                      uploading: "stage-upload", restarting: "stage-bench", done: "stage-edited" };
+  var ROLE_STOPPED = "role-failed";     // a start over that stopped, as the queue's Start over stopped row shows it
   var RULE_WORDS = { chunks: "Chunks present", transform: "Transforms", faces: "Crop", scale: "Scale",
                      align: "Alignment", steps: "Checklist" };
   var KIND_WORDS = { editor_explanation: "Editor explanation", check_note: "Check note", admin_review: "Admin review",
@@ -111,6 +124,7 @@
   var LINES = {
     decision: "Choose Mark for upload, Send back with instructions or Start over.",
     initials: "Type your initials, two to four letters, for example LO.",
+    initialsPanel: "Type your initials, two to four letters, at the top of the panel.",
     noReport: "Write the admin report before recording a decision.",
     longReport: "Keep the admin report to 4,000 characters.",
     nul: "Remove the NUL character from the text before recording.",
@@ -128,6 +142,8 @@
     opening: "Opening Metashape...",
     moving: "Moving the transect back to admin review...",
     noneInReview: "No transect is in admin review.",
+    resumeKept: "VICARIUS resumes with the report and instructions written at the first Start over.",
+    resumeRewrite: "The first Start over did not reach the notes; write the report and instructions again.",
   };
 
   var TIPS = {
@@ -139,8 +155,8 @@
       "and it passed on the next pass.",
     scale: "The checks read each chunk's scale error and marker spread from the project; " +
       "a chunk with one scale bar has no cross-check.",
-    timings: "VICARIUS counts time in Metashape from each open to its close and time in each state from the " +
-      "atlas status changes.",
+    timings: "VICARIUS counts time in Metashape from each open to its close, and time in editing and in review " +
+      "from the atlas status changes, so time in editing includes days with Metashape closed.",
     notes: "VICARIUS keeps every explanation, check note, admin report and instruction written about this " +
       "transect, grouped by edit round.",
     decision: "An admin records one of three decisions for the transect. VICARIUS writes the decision and the " +
@@ -165,7 +181,8 @@
     resumeConfirm: "Resume the stopped start over now, from the stage it reached.",
     reload: "Read the review record again, keeping the typed report and instructions.",
     unlock: "Unlock admin mode with the admin PIN. VICARIUS then reads the review record again, keeping the typed text.",
-    queueOpen: "Open the review of this transect under the list, with its checks, notes and decisions.",
+    queueOpen: "Open this transect's checks, notes and decision. " +
+      "VICARIUS keeps the list in place and refreshes it after a decision.",
   };
 
   // The typed report, instructions and decision per "<job>/<psx>", kept across
@@ -237,6 +254,20 @@
       " at " + astText(r.at) + ".";
   }
 
+  // The sentence of a refusal (answer = {status, body, timedOut}): the
+  // route's message or error; else, for a 5xx, the desktop's status and that
+  // nothing changed (spec C section 8); else lead and the status.
+  function refusalText(answer, lead) {
+    var a = answer || {};
+    if (a.timedOut) return LINES.timeout;
+    var b = isObject(a.body) ? a.body : {};
+    var said = typeof b.message === "string" && b.message ? b.message : (typeof b.error === "string" ? b.error : "");
+    if (said) return said;
+    if (!a.status) return LINES.noAnswer;
+    if (a.status >= HTTP_SERVER_ERROR) return "The desktop answered " + a.status + "; nothing on this pane changed.";
+    return String(lead || "") + "the desktop answered " + a.status + ".";
+  }
+
   // Check a decision form against program B's review body rules (spec B 5.4).
   // form: {decision, report, instructions, initials, startUpload}. Returns
   // {ok: true, body} with the body to post, or {ok: false, line}.
@@ -282,9 +313,11 @@
       " scale error and " + (spread ? spread + " mm" : "-") + " marker spread" + saved + ".";
   }
 
-  // The sentence of the Start over confirmation: the folder moving aside, or,
-  // for a stopped start over, the stage it resumes from and where the edited copy already sits.
-  function restartConfirmText(d, resume) {
+  // The sentence of the Start over confirmation: the bench folder moving
+  // aside and the Shelf folder the fresh copy comes from (shelf, the job
+  // row's shelf_location; "the Shelf" when unknown), or, for a stopped start
+  // over, the stage it resumes from and where the edited copy already sits.
+  function restartConfirmText(d, resume, shelf) {
     var folder = String(d.processing_folder || "");
     var restart = isObject(d.restart) ? d.restart : {};
     if (resume) {
@@ -294,34 +327,68 @@
         (aside ? "; the edited copy already sits aside as " + aside : "") + ".";
     }
     var benchPath = String((isObject(d.on_bench) && d.on_bench.path) || folder);
+    var source = String(shelf || "").trim();
     return "VICARIUS moves " + benchPath + " aside as " + folder + RESTART_ASIDE_MARK +
-      " followed by the date and time of the move, and pulls a fresh copy from the Shelf.";
+      " followed by the date and time of the move, and pulls a fresh copy from " + (source || "the Shelf") + ".";
   }
 
-  // Why a start over stopped, and what a resume keeps, above the form while one is stopped.
+  // Where a start over stopped, then its recorded error as a sentence of its own.
   function resumeLine(d) {
     var restart = isObject(d.restart) ? d.restart : {};
     var why = String(restart.error || "").trim();
-    return "The start over stopped at " + (RESTART_STAGE_WORDS[restart.stage] || "a stage not recorded") +
-      (why ? ": " + why.replace(/\.$/, "") : "") + ". Resume still asks for a report and instructions; " +
-      "VICARIUS keeps the ones written with the first Start over.";
+    if (why && !/[.!?]$/.test(why)) why += ".";
+    return "The start over stopped at " + (RESTART_STAGE_WORDS[restart.stage] || "a stage not recorded") + "." +
+      (why ? " " + why.charAt(0).toUpperCase() + why.slice(1) : "");
+  }
+
+  // The report and instructions the first Start over wrote to the notes (the
+  // latest admin review note deciding restart, and the instructions note of
+  // the same decision), which a resume posts again; null when either is
+  // missing (the first decision's registry write failed), so the admin types them.
+  function resumeTexts(notes) {
+    var list = listOf(notes);
+    var report = list.filter(function (n) {
+      return n.kind === KIND_ADMIN_REVIEW && n.decision === DECISION_RESTART && typeof n.text === "string" && n.text.trim();
+    }).pop();
+    if (!report) return null;
+    var instructions = list.filter(function (n) {
+      return n.kind === KIND_RETURN_INSTRUCTIONS && n.source_id && n.source_id === report.source_id &&
+        typeof n.text === "string" && n.text.trim();
+    }).pop();
+    return instructions ? { report: report.text, instructions: instructions.text } : null;
+  }
+
+  // The state chip and words of the review head: a start over that stopped
+  // reads as stopped (with its stage), as its Start over stopped row does.
+  function stateBadge(d) {
+    var r = isObject(d) ? d : {};
+    var restart = isObject(r.restart) ? r.restart : {};
+    if (r.state === STATE_RESTARTING && String(restart.error || "").trim()) {
+      return { role: ROLE_STOPPED, words: "start over stopped at " + (RESTART_STAGE_WORDS[restart.stage] ||
+        "a stage not recorded") };
+    }
+    return { role: STATE_ROLES[r.state] || "role-empty", words: STATE_WORDS[r.state] || r.state || "state not recorded" };
   }
 
   // Time in editing (every editing interval summed) and time in review so
   // far (the open review interval) from program A's intervals of the
-  // transect's first readable id that has any; null where unknown. Program
-  // B writes one status for every readable id of a transect at once.
+  // transect's first readable id whose list is not empty; null where
+  // unknown, and editing_s null when no editing interval exists. Program B
+  // writes one status for every readable id of a transect at once.
   function stateTimes(intervalsById, readableIds) {
     var byId = isObject(intervalsById) ? intervalsById : {};
     var ids = Array.isArray(readableIds) ? readableIds : [];
-    var chosen = null;
-    for (var i = 0; i < ids.length && !chosen; i++) if (Array.isArray(byId[ids[i]])) chosen = byId[ids[i]];
-    if (!chosen) return { editing_s: null, review_open_s: null };
-    var spells = chosen.filter(isObject);
-    var editing = spells.reduce(function (sum, s) {
+    var spells = null;
+    for (var i = 0; i < ids.length && !spells; i++) {
+      var listed = Array.isArray(byId[ids[i]]) ? byId[ids[i]].filter(isObject) : [];
+      if (listed.length) spells = listed;
+    }
+    if (!spells) return { editing_s: null, review_open_s: null };
+    var editingSpells = spells.filter(function (s) { return s.value === STATUS_EDITING; });
+    var editing = editingSpells.length ? editingSpells.reduce(function (sum, s) {
       var n = Number(s.seconds);
-      return s.value === STATUS_EDITING && isFinite(n) && n > 0 ? sum + n : sum;
-    }, 0);
+      return isFinite(n) && n > 0 ? sum + n : sum;
+    }, 0) : null;
     var last = spells[spells.length - 1];
     var open = last && last.open === true && last.value === STATUS_REVIEW && isFinite(Number(last.seconds))
       ? Number(last.seconds) : null;
@@ -368,7 +435,9 @@
   var helpers = { esc: esc, levelWord: levelWord, roundLabel: roundLabel, astText: astText, spanText: spanText,
                   resultLine: resultLine, readyToRecord: readyToRecord, projectUrl: projectUrl, limitsLine: limitsLine,
                   restartConfirmText: restartConfirmText, stateTimes: stateTimes, roundGroups: roundGroups,
-                  queueMeta: queueMeta, transectWords: transectWords, TIPS: TIPS, LINES: LINES };
+                  queueMeta: queueMeta, transectWords: transectWords, resumeLine: resumeLine, resumeTexts: resumeTexts,
+                  stateBadge: stateBadge, refusalText: refusalText, STATE_ROLES: STATE_ROLES, LEVEL_ROLES: LEVEL_ROLES,
+                  TIPS: TIPS, LINES: LINES };
   if (typeof module === "object" && module && module.exports) module.exports = helpers;
   if (typeof window === "undefined") return;
 
@@ -385,22 +454,32 @@
       symbol + "</span></button>";
   }
 
-  function sectionHead(text, tip) {
+  // A section heading with its "i" glyph; about names the glyph ("About notes") when the
+  // visible heading carries more than the plain word (a count).
+  function sectionHead(text, tip, about) {
     return '<div class="vt-list-head"><h3 class="vt-list-title">' + esc(text) + "</h3>" +
-      glyph("i", text.toLowerCase(), tip) + "</div>";
+      glyph("i", about || text.toLowerCase(), tip) + "</div>";
   }
 
   function dimLine(text, extraClass) {
     return '<p class="vt-review-dim' + (extraClass ? " " + extraClass : "") + '">' + esc(text) + "</p>";
   }
 
+  // Who the review names as the editor: whoever certified the edit, else the
+  // project's creator (the Review queue row reads the same order).
+  function editorOf(d) {
+    var c = isObject(d.certification) ? d.certification : {};
+    return String(c.by || d.editor || "");
+  }
+
   // The state chip, the round and the editor on one line.
   function factsHtml(d) {
     var round = roundLabel(d.round);
-    return '<p class="vt-review-facts"><span data-review-part="state">' +
-      stateHtml(STATE_ROLES[d.state] || "role-empty", STATE_WORDS[d.state] || d.state || "state not recorded") +
+    var badge = stateBadge(d);
+    var editor = editorOf(d);
+    return '<p class="vt-review-facts"><span data-review-part="state">' + stateHtml(badge.role, badge.words) +
       "</span>" + (round ? '<span class="count">' + esc(round) + "</span>" : "") +
-      (d.editor ? '<span class="count">edited by ' + esc(d.editor) + "</span>" : "") + "</p>";
+      (editor ? '<span class="count">edited by ' + esc(editor) + "</span>" : "") + "</p>";
   }
 
   // One definition-list row: the label with its "?" glyph, the control beside it.
@@ -510,24 +589,27 @@
 
   function noteHtml(n) {
     var qualifier = NOTE_DECISION_WORDS[n.decision] || RULE_WORDS[n.rule] || "";
-    return '<div class="vt-review-note"><p class="vt-review-note-head"><span class="vt-review-kind">' +
+    var admin = ADMIN_KINDS.indexOf(n.kind) !== -1 ? " is-admin" : "";
+    return '<div class="vt-review-note"><p class="vt-review-note-head"><span class="vt-review-kind' + admin + '">' +
       esc(KIND_WORDS[n.kind] || n.kind || "note") + "</span>" +
       (qualifier ? '<span class="count">' + esc(qualifier) + "</span>" : "") +
       '<span class="count">' + esc(n.by || "") + "</span>" + '<span class="count">' + esc(astText(n.at)) + "</span></p>" +
       '<pre class="vt-review-text">' + esc(n.text) + "</pre></div>";
   }
 
+  // One round of notes under its "Edit round N" heading, with the outcome of an earlier round beside it.
+  function roundHtml(round, outcome, notes) {
+    return '<div class="vt-review-round"><h4 class="vt-review-round-head">' + esc(roundLabel(round) || "Round not recorded") +
+      (outcome ? '<span class="count">' + esc(outcome) + "</span>" : "") + "</h4>" + notes.map(noteHtml).join("") + "</div>";
+  }
+
   function notesHtml(d) {
     var groups = roundGroups(d.notes, d.round);
     var count = groups.current.length + groups.earlier.reduce(function (sum, g) { return sum + g.notes.length; }, 0);
-    var earlier = groups.earlier.map(function (g) {
-      return '<div class="vt-review-round"><h4 class="vt-review-round-head">' + esc(roundLabel(g.round)) +
-        (g.outcome ? '<span class="count">' + esc(g.outcome) + "</span>" : "") + "</h4>" +
-        g.notes.map(noteHtml).join("") + "</div>";
-    }).join("");
-    return sectionHead("Notes (" + count + ")", TIPS.notes) +
+    var earlier = groups.earlier.map(function (g) { return roundHtml(g.round, g.outcome, g.notes); }).join("");
+    return sectionHead("Notes (" + count + ")", TIPS.notes, "notes") +
       (d.notes_error ? '<p class="result result-error">' + esc(d.notes_error) + "</p>" : "") +
-      (groups.current.length ? groups.current.map(noteHtml).join("")
+      (groups.current.length ? roundHtml(Number(d.round) || 0, "", groups.current)
         : dimLine("No notes are recorded for " + (roundLabel(d.round) || "this round").toLowerCase() + ".")) +
       (groups.earlier.length ? '<details class="src vt-review-earlier"><summary>Earlier rounds (' +
         groups.earlier.length + ")</summary>" + earlier + "</details>" : "");
@@ -560,9 +642,9 @@
     }).join("") + "</span>";
   }
 
-  function confirmHtml(d, resume) {
+  function confirmHtml(d, resume, shelf) {
     return '<div class="vt-review-confirm" data-review-part="confirm" role="group" aria-label="Confirm the start over" hidden>' +
-      "<p>" + esc(restartConfirmText(d, resume)) + "</p>" +
+      "<p>" + esc(restartConfirmText(d, resume, shelf)) + "</p>" +
       '<div class="vt-review-confirm-acts"><button type="button" class="btn btn-mini btn-danger" ' +
       'data-review-action="restart-confirm" title="' + esc(resume ? TIPS.resumeConfirm : TIPS.restartConfirm) + '">' +
       (resume ? "Resume now" : "Start over now") + "</button>" +
@@ -576,23 +658,27 @@
 
   // The decision block of a transect with a decision open: the report, the
   // radios (or only the resume), Start the upload now, the instructions, the
-  // Start over confirmation, Record decision and the result line.
-  function formHtml(d, draft, ids) {
+  // Start over confirmation, Record decision and the result line. A resume
+  // whose first report and instructions are in the notes (kept) shows neither
+  // field and posts those texts again.
+  function formHtml(d, draft, ids, shelf, kept) {
     var resume = isResume(d);
     var chosen = resume ? DECISION_RESTART : (draft.decision || "");
-    var choices = rowHtml(ids.report, "Admin report", TIPS.report,
-      textareaHtml(ids.report, "report", 4, REPORT_MAX_CHARS, draft.report)) +
-      (resume ? "" : '<div data-review-row="decision"><dt><span id="' + ids.choice + '">Decision</span>' +
-        glyph("?", "the decision", TIPS.choice) + '</dt><dd class="dd-list">' + radiosHtml(ids, chosen) + "</dd></div>") +
+    var hideTexts = resume && !!kept;
+    var choices = (hideTexts ? "" : rowHtml(ids.report, "Admin report", TIPS.report,
+      textareaHtml(ids.report, "report", 4, REPORT_MAX_CHARS, draft.report))) +
+      (resume ? "" : '<div data-review-row="decision"><dt><span id="' + ids.choice + '">Next step</span>' +
+        glyph("?", "the next step", TIPS.choice) + '</dt><dd class="dd-list">' + radiosHtml(ids, chosen) + "</dd></div>") +
       rowHtml(ids.startUpload, "Upload", TIPS.startUpload, '<label class="opt"><input type="checkbox" id="' +
         ids.startUpload + '" data-review-field="start_upload"' + (draft.startUpload ? " checked" : "") +
         "> Start the upload now</label>", ' data-review-row="start_upload"' + (chosen === "upload" ? "" : " hidden")) +
-      rowHtml(ids.instructions, "Instructions to the editor", TIPS.instructions,
+      (hideTexts ? "" : rowHtml(ids.instructions, "Instructions to the editor", TIPS.instructions,
         textareaHtml(ids.instructions, "instructions", 3, INSTRUCTIONS_MAX_CHARS, draft.instructions),
-        ' data-review-row="instructions"' + (chosen && chosen !== "upload" ? "" : " hidden"));
+        ' data-review-row="instructions"' + (chosen && chosen !== "upload" ? "" : " hidden")));
     var label = resume ? RESUME_LABEL : "Record decision";
-    return (resume ? dimLine(resumeLine(d)) : "") + '<dl class="choices vt-review-choices">' + choices + "</dl>" +
-      confirmHtml(d, resume) + '<div class="actions"><button type="button" class="btn btn-primary" ' +
+    var resumeLines = resume ? dimLine(resumeLine(d)) + dimLine(kept ? LINES.resumeKept : LINES.resumeRewrite) : "";
+    return resumeLines + (choices ? '<dl class="choices vt-review-choices">' + choices + "</dl>" : "") +
+      confirmHtml(d, resume, shelf) + '<div class="actions"><button type="button" class="btn btn-primary" ' +
       'data-review-action="record" title="' + esc(resume ? TIPS.resume : TIPS.record) + '"' +
       (chosen ? "" : " disabled") + ">" + esc(label) + "</button></div>" + lineHtml();
   }
@@ -600,9 +686,11 @@
   // The decision section: the form while a decision is open; otherwise one
   // line saying why none is, with Back to admin review when the transect
   // can still go back (ruling O3).
-  function decisionHtml(d, draft, ids) {
+  function decisionHtml(d, draft, ids, shelf, kept) {
     var head = sectionHead("Decision", TIPS.decision);
-    if (offeredDecisions(d).length) return '<div data-review-part="decision">' + head + formHtml(d, draft, ids) + "</div>";
+    if (offeredDecisions(d).length) {
+      return '<div data-review-part="decision">' + head + formHtml(d, draft, ids, shelf, kept) + "</div>";
+    }
     var stateWord = STATE_WORDS[d.state] || d.state || "not recorded";
     var back = d.can_return_to_review === true
       ? '<div class="actions"><button type="button" class="btn btn-primary" data-review-action="back" title="' +
@@ -611,10 +699,11 @@
       back + lineHtml() + "</div>";
   }
 
-  function paneHtml(d, draft, ids, initials, ownInitials, times) {
-    return factsHtml(d) + (ownInitials ? initialsHtml(ids, initials) : "") + openHtml() + checksHtml(d) +
-      scaleAlignHtml(d) + timingsHtml(d, times) + certificationHtml(d) + notesHtml(d) + benchHtml(d) +
-      decisionHtml(d, draft, ids);
+  // view = {draft, ids, initials, ownInitials, times, shelf, kept}.
+  function paneHtml(d, view) {
+    return factsHtml(d) + (view.ownInitials ? initialsHtml(view.ids, view.initials) : "") + openHtml() + checksHtml(d) +
+      scaleAlignHtml(d) + timingsHtml(d, view.times) + certificationHtml(d) + notesHtml(d) + benchHtml(d) +
+      decisionHtml(d, view.draft, view.ids, view.shelf, view.kept);
   }
 
   /* ---- requests ------------------------------------------------------------ */
@@ -652,15 +741,6 @@
                               body: JSON.stringify(body) });
   }
 
-  // The sentence of a refusal: the route's message or error, else the status.
-  function refusalText(answer, lead) {
-    if (answer.timedOut) return LINES.timeout;
-    var b = answer.body || {};
-    var said = typeof b.message === "string" && b.message ? b.message : (typeof b.error === "string" ? b.error : "");
-    if (said) return said;
-    return answer.status ? lead + "the desktop answered " + answer.status + "." : LINES.noAnswer;
-  }
-
   function readStore(key) { try { return window.localStorage.getItem(key); } catch (e) { return null; } }
   function writeStore(key, value) { try { window.localStorage.setItem(key, value); } catch (e) { /* the review still works */ } }
 
@@ -689,12 +769,13 @@
     var root = reviewRoot(el);
     var body = root.querySelector('[data-review-part="body"]') || root;
     var base = root.getAttribute("data-vt-base") || DEFAULT_BASE;
+    var shelf = root.getAttribute("data-shelf-location") || "";
     var panelInitials = o.initialsInput && typeof o.initialsInput.value === "string" ? o.initialsInput : null;
     var key = o.jobId + "/" + o.psx;
     var n = ++mountCount;
     var ids = { initials: "vt-review-initials-" + n, report: "vt-review-report-" + n, choice: "vt-review-choice-" + n,
                 instructions: "vt-review-instructions-" + n, startUpload: "vt-review-start-" + n };
-    var st = { dossier: null, busy: false, opening: false, recorded: false, relocked: false, live: true };
+    var st = { dossier: null, kept: null, busy: false, opening: false, recorded: false, relocked: false, live: true };
     var session = window.VICADMINSESSION;
     var unsubscribe = session && typeof session.onChange === "function" ? session.onChange(function (change) {
       if (!root.isConnected) { st.live = false; return; }
@@ -709,6 +790,9 @@
       return picked ? picked.value : "";
     }
     function initialsBox() { return panelInitials || field("initials"); }
+    // The initials refusal names where the field is: the panel's own field, or the review's.
+    function initialsLine() { return panelInitials ? LINES.initialsPanel : LINES.initials; }
+    function confirmOpen() { var c = part("confirm"); return !!(c && !c.hidden); }
 
     // The decision line: one sentence (kind "error" or "done" colours it) and
     // the one action that resolves it beside it: Reload, or Close once recorded.
@@ -725,7 +809,7 @@
 
     // Keep the typed text for this page load; a recorded decision has no draft left to keep.
     function saveDraft() {
-      if (st.recorded || !field("report")) return;
+      if (st.recorded || !field("report") || !field("instructions")) return;
       var box = field("start_upload");
       drafts[key] = { report: field("report").value, instructions: field("instructions").value,
                       decision: chosenDecision(), startUpload: !!(box && box.checked) };
@@ -785,8 +869,10 @@
         st.recorded = false;
         st.busy = false;
         st.opening = false;
-        var times = stateTimes(got[1].intervals, record.dossier.readable_ids);
-        body.innerHTML = paneHtml(record.dossier, drafts[key] || {}, ids, rememberedInitials(), !panelInitials, times);
+        st.kept = isResume(record.dossier) ? resumeTexts(record.dossier.notes) : null;
+        body.innerHTML = paneHtml(record.dossier, { draft: drafts[key] || {}, ids: ids, initials: rememberedInitials(),
+                                                    ownInitials: !panelInitials, shelf: shelf, kept: st.kept,
+                                                    times: stateTimes(got[1].intervals, record.dossier.readable_ids) });
         if (flash) setLine(flash, "done");
       });
     }
@@ -796,15 +882,18 @@
       var record = root.querySelector('[data-review-action="record"]');
       var confirm = root.querySelector('[data-review-action="restart-confirm"]');
       var back = root.querySelector('[data-review-action="back"]');
-      if (record) record.disabled = busy || st.recorded || !chosenDecision();
+      if (record) record.disabled = busy || st.recorded || !chosenDecision() || confirmOpen();
       if (confirm) confirm.disabled = busy;
       if (back) back.disabled = busy || st.recorded;
     }
 
+    // The form to check and post; a resume whose first texts are kept posts those texts.
     function formFor(decision) {
       var box = field("start_upload");
       var initials = initialsBox();
-      return { decision: decision, report: field("report").value, instructions: field("instructions").value,
+      var texts = st.kept && isResume(st.dossier || {}) ? st.kept
+        : { report: field("report") ? field("report").value : "", instructions: field("instructions") ? field("instructions").value : "" };
+      return { decision: decision, report: texts.report, instructions: texts.instructions,
                initials: initials ? initials.value : "", startUpload: decision === "upload" && !!(box && box.checked) };
     }
 
@@ -845,11 +934,13 @@
       if (panelInitials) panelInitials.value = value;
     }
 
-    // Hand an upload the decision started to the panel's upload window.
+    // Hand an upload the decision started to the panel's upload window, cache-busted with
+    // the manual edit module's asset version (the component is that module's file).
     function openUpload(uploadId, said) {
       var vt = window.VoyagerTools || {};
       if (typeof vt.openUploadWindow !== "function") return;
-      vt.openUploadWindow(uploadId, { version: root.getAttribute("data-vt-version") || "",
+      vt.openUploadWindow(uploadId, { version: root.getAttribute("data-manual-edit-version") ||
+                                               root.getAttribute("data-vt-version") || "",
                                       readInitials: function () { var b = initialsBox(); return b ? b.value.trim().toUpperCase() : ""; } });
       setLine(said, "done");
     }
@@ -882,7 +973,7 @@
       var box = initialsBox();
       var value = String(box ? box.value : "").trim().toUpperCase();
       if (INITIALS_RE.test(value)) return value;
-      if (lineEl) { lineEl.className = lineEl.className.replace(/ is-error/g, "") + " is-error"; lineEl.textContent = LINES.initials; }
+      if (lineEl) { lineEl.className = lineEl.className.replace(/ is-error/g, "") + " is-error"; lineEl.textContent = initialsLine(); }
       if (box && typeof box.focus === "function") box.focus();
       return "";
     }
@@ -894,13 +985,15 @@
       if (confirm) confirm.hidden = true;
       var checked = readyToRecord(formFor(decision));
       if (!checked.ok) {
-        setLine(checked.line, "error");
-        if (checked.line === LINES.initials) checkedInitials(null);
+        var initialsMiss = checked.line === LINES.initials;
+        setLine(initialsMiss ? initialsLine() : checked.line, "error");
+        if (initialsMiss) checkedInitials(null);
         return;
       }
       if (decision === DECISION_RESTART) {
         if (confirm) confirm.hidden = false;
         setLine("");
+        setBusy(st.busy);
         return;
       }
       record(checked);
@@ -937,7 +1030,7 @@
     function backToReview() {
       if (st.busy || st.recorded) return;
       var initials = checkedInitials(null);
-      if (!initials) { setLine(LINES.initials, "error"); return; }
+      if (!initials) { setLine(initialsLine(), "error"); return; }
       setBusy(true);
       setLine(LINES.moving);
       postJSON(projectUrl(o.jobId, o.psx, "/back-to-review"), { initials: initials }).then(function (answer) {
@@ -978,10 +1071,10 @@
       if (action === "open") openInMetashape();
       else if (action === "record") decide();
       else if (action === "back") backToReview();
-      else if (action === "restart-cancel") { part("confirm").hidden = true; }
+      else if (action === "restart-cancel") { part("confirm").hidden = true; setBusy(st.busy); }
       else if (action === "restart-confirm") {
         var checked = readyToRecord(formFor(DECISION_RESTART));
-        if (!checked.ok) { setLine(checked.line, "error"); return; }
+        if (!checked.ok) { setLine(checked.line === LINES.initials ? initialsLine() : checked.line, "error"); return; }
         part("confirm").hidden = true;
         record(checked);
       }
@@ -1029,7 +1122,7 @@
                   item.warned_checks ? plural(item.warned_checks, "check") + " warned" : ""].filter(Boolean).join(", ");
     return '<li class="row" data-vt-review-key="' + esc(item.job_id + "/" + item.psx) + '"><span class="row-name">' +
       nameHtml(item) + '</span><span class="row-act">' + reviewButtonHtml("items", index) + "</span>" +
-      '<span class="row-state">' + stateHtml("role-attention", roundLabel(item.round) || "admin review") +
+      '<span class="row-state">' + stateHtml(STATE_ROLES.review, roundLabel(item.round) || "admin review") +
       (checks ? '<span class="count">' + esc(checks) + "</span>" : "") + "</span>" +
       projectMeta(item, ["edited by " + (item.editor || "-"), item.confirmed_at ? "confirmed " + astText(item.confirmed_at) : ""]) +
       "</li>";
@@ -1038,7 +1131,7 @@
   function stoppedRowHtml(item, index) {
     return '<li class="row" data-vt-review-key="' + esc(item.job_id + "/" + item.psx) + '"><span class="row-name">' +
       nameHtml(item) + '</span><span class="row-act">' + reviewButtonHtml("stopped", index) + "</span>" +
-      '<span class="row-state">' + stateHtml("role-failed", "Stopped at " + (RESTART_STAGE_WORDS[item.stage] ||
+      '<span class="row-state">' + stateHtml(ROLE_STOPPED, "Stopped at " + (RESTART_STAGE_WORDS[item.stage] ||
         "a stage not recorded")) + "</span>" +
       '<span class="row-meta"><span class="vt-error-text">' + esc(item.error) + "</span></span>" +
       projectMeta(item, [roundLabel(item.round), item.at ? "started over " + astText(item.at) : ""]) + "</li>";
@@ -1047,7 +1140,7 @@
   function returnableRowHtml(item, index) {
     return '<li class="row" data-vt-review-key="' + esc(item.job_id + "/" + item.psx) + '"><span class="row-name">' +
       nameHtml(item) + '</span><span class="row-act">' + reviewButtonHtml("returnable", index) + "</span>" +
-      '<span class="row-state">' + stateHtml("role-planned", "Marked for upload") + "</span>" +
+      '<span class="row-state">' + stateHtml(STATE_ROLES.upload, "Marked for upload") + "</span>" +
       projectMeta(item, [roundLabel(item.round), "edited by " + (item.editor || "-")]) + "</li>";
   }
 

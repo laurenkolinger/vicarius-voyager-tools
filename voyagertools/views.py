@@ -62,7 +62,7 @@ URL_PREFIX = "/voyager-tools"
 MODULE_SLUG = "voyager_tools"
 DISPLAY_NAME = "Atlas control panel"
 UI_STYLE = "voyager_tools"
-ASSET_VERSION = "20260927h"
+ASSET_VERSION = "20260927i"
 ROOT_SECTION_PREFIX = '<section class="voyager-tools"'
 STATIC_JS = "voyager_tools.js"
 STATIC_SETTINGS_JS = "vt_settings.js"  # the settings and desktop panes (program C spec 5.3)
@@ -204,8 +204,9 @@ def _recover_restarts_default(records: list[dict]) -> list[dict]:
     Runs only in an app that mounts the manual edit blueprint, whose leg
     registry knows which start overs are live in this process (the same
     rule as _recover_uploads_default); any other host returns the records
-    as they are. A recovery that stops is logged, never raised, and that
-    record is returned as read.
+    as they are. A recovery that stops (the job store's error, or an OSError,
+    ValueError or TypeError from a file it writes) is logged, never raised,
+    and that record is returned as read.
 
     Parameters:
         records: the unfinished job records the caller read.
@@ -222,7 +223,7 @@ def _recover_restarts_default(records: list[dict]) -> list[dict]:
     for record in records:
         try:
             recovered.append(transfers.recover_stale_restarts(manual_views.get_deps(), store, record))
-        except jobstore.JobStoreError as exc:
+        except (jobstore.JobStoreError, OSError, ValueError, TypeError) as exc:
             current_app.logger.warning("voyager tools: the stranded start over recovery of %s stopped: %s",
                                        record.get(JOB_ID_KEY), exc)
             recovered.append(record)

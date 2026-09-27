@@ -25,6 +25,7 @@ Outputs: JSON. The only writes are the manual edit module's recoveries of
 """
 from __future__ import annotations
 
+import importlib
 import re
 from collections.abc import Mapping
 from datetime import date, datetime
@@ -48,7 +49,13 @@ LINE_BAD_PSX = "Name the transect by its Metashape project file, for example MRS
 LINE_UNKNOWN_JOB = "No manual edit project {job_id} is recorded."
 LINE_UNKNOWN_TRANSECT = "{psx} is not a transect of manual edit project {job_id}."
 LINE_UNREADABLE_JOB = "The manual edit project {job_id} cannot be read: {error}"
+LINE_QUEUE_UNREADABLE = ("The manual edit project {job_ids} cannot be read, so the Review queue lists nothing; "
+                         "open Clean manual edit run to see it.")
 REVIEW_TEMPLATE = "voyager_tools/review.html"
+# A job id as it appears inside a job store error (a file name or a sentence);
+# each candidate is then checked whole against the job store's own pattern.
+JOB_ID_CANDIDATE = re.compile(r"ME-[0-9A-Za-z-]+")
+MANUAL_EDIT_VIEWS_MODULE = "manualedit.views"
 
 
 # --- helpers -----------------------------------------------------------------
@@ -203,11 +210,10 @@ def api_timelines_detail():
 
 # --- the Review queue and the review fragment (milestone C6) ------------------------
 
-def _queue_states(jobstore_module) -> review_queue.QueueStates:
-    """The transect states the queue reads, from the manual edit job store."""
-    return review_queue.QueueStates(review=jobstore_module.PROJECT_REVIEW,
-                                    restarting=jobstore_module.PROJECT_RESTARTING,
-                                    upload=jobstore_module.PROJECT_UPLOAD)
+def _queue_rules(jobstore_module) -> review_queue.QueueRules:
+    """The transect rules the queue applies, from the manual edit job store (the ones its dossier uses)."""
+    return review_queue.QueueRules(stopped=jobstore_module.restart_stopped,
+                                   returnable=jobstore_module.can_return_to_review)
 
 
 @voyager_tools_bp.route("/api/review/queue", methods=["GET"])
@@ -222,13 +228,41 @@ def api_review_queue():
     (the step its dossier route takes), so it lists under Start over stopped.
     """
     _store, jsm = _manual_edit()
-    jobs = views.deps.recover_restarts(views._unfinished_jobs())
+    jobs = views.deps.recover_restarts(_queue_jobs(jsm))
     registry = views.deps.registry()
     rows = _read_registry(registry.load)
     payload = review_queue.queue_items(rows, jobs, views.deps.site_name, sort_key=registry.sort_key,
-                                       status_review=registry.ME_REVIEW, states=_queue_states(jsm))
+                                       status_review=registry.ME_REVIEW, rules=_queue_rules(jsm))
     payload["read_at"] = views.deps.now_iso()
     return jsonify(payload)
+
+
+def _queue_jobs(jobstore_module) -> list[dict]:
+    """Every unfinished job record, read strictly; an unreadable one is a 500 naming its project id, not its path.
+
+    The full error (with the file path) goes to the desktop log; the pane
+    shows one line naming the project and where to look at it.
+
+    Raises:
+        RequestError: 500 in one sentence.
+    """
+    try:
+        return [job for job in views.deps.active_jobs() if isinstance(job, Mapping)]
+    except Exception as exc:  # noqa: BLE001  (the store's own error classes all mean: fix the file)
+        current_app.logger.warning("voyager tools: the Review queue could not read the job files: %s", exc)
+        job_ids = sorted({token for token in JOB_ID_CANDIDATE.findall(str(exc))
+                          if jobstore_module.JOB_ID_PATTERN.fullmatch(token)})
+        line = (LINE_QUEUE_UNREADABLE.format(job_ids=" and ".join(job_ids)) if job_ids
+                else f"The manual edit job files cannot be read: {exc}")
+        raise RequestError(line, views.HTTP_SERVER_ERROR) from exc
+
+
+def _manual_edit_asset_version() -> str:
+    """The manual edit module's asset version (the upload window's cache bust), "" when it cannot be read."""
+    try:
+        return str(getattr(importlib.import_module(MANUAL_EDIT_VIEWS_MODULE), "ASSET_VERSION", "") or "")
+    except ImportError:
+        return ""
 
 
 def _review_job(store, jobstore_module, job_id: str) -> dict:
@@ -252,7 +286,8 @@ def review_fragment_payload(job_value, psx_value) -> dict:
         stops it; otherwise {ui_style, locked, base, html, scripts, styles,
         mount, opts, module}, the html being templates/voyager_tools/review.html
         with the transect's head (psx, site full name and code, transect,
-        readable ids) rendered and escaped.
+        readable ids) rendered and escaped, and the transect's Shelf folder
+        and the manual edit asset version as data attributes.
 
     Raises:
         RequestError: 400 a malformed job or psx, 404 an unknown project or
@@ -268,8 +303,8 @@ def review_fragment_payload(job_value, psx_value) -> dict:
     transect = review_queue.transect_of(job, psx, views.deps.site_name, views.deps.registry().sort_key)
     if transect is None:
         raise RequestError(LINE_UNKNOWN_TRANSECT.format(psx=psx, job_id=job_id), views.HTTP_NOT_FOUND)
-    html = render_template(REVIEW_TEMPLATE, base=views.URL_PREFIX, v=views.ASSET_VERSION, job_id=job_id,
-                           **transect).strip()
+    html = render_template(REVIEW_TEMPLATE, base=views.URL_PREFIX, v=views.ASSET_VERSION,
+                           manual_edit_version=_manual_edit_asset_version(), job_id=job_id, **transect).strip()
     return {"ui_style": views.UI_STYLE_REVIEW, "locked": False, "base": views.URL_PREFIX, "html": html,
             "scripts": views.asset_urls(views.REVIEW_SCRIPTS), "styles": views.asset_urls((views.STATIC_CSS,)),
             "mount": views.MOUNT_REVIEW, "opts": {"jobId": job_id, "psx": psx},

@@ -46,6 +46,7 @@
   var UPLOADS_ROUTE = MANUAL_EDIT_BASE + "/api/uploads";
   var SHELF_ROUTE = "/api/settings/shelf";
   // A done set is strictly verified, the role the Timelines pane gives an uploaded transect.
+  var ROLE_REVIEW = "stage-review";  // the atlas matrix's admin review colour (static/vicarius_roles.css)
   var STATUS_ROLES = { queued: "role-planned", running: "role-in-progress", done: "role-verified", failed: "role-failed",
                        stopped: "role-attention", interrupted: "role-attention" };
   var STATUS_WORDS = { queued: "queued", running: "running", done: "done", failed: "failed", stopped: "stopped",
@@ -194,7 +195,7 @@
   function reviewRowHtml(item) {
     var round = item.round > 0 ? '<span class="count">edit round ' + esc(item.round + 1) + "</span>" : "";
     return '<li class="row"><span class="row-name">' + nameHtml(item) + " " + chip(item.psx) + "</span>" +
-      '<span class="row-state">' + stateHtml("role-attention", WORDS_REVIEW) + "</span>" +
+      '<span class="row-state">' + stateHtml(ROLE_REVIEW, WORDS_REVIEW) + "</span>" +
       projectMetaHtml(item, round) + "</li>";
   }
 
