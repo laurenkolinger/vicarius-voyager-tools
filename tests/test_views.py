@@ -61,16 +61,21 @@ RID_LBH = "LBH_T2_2025_pbl"
 FOLDER = "MRS_T1_3D"  # the one processing folder of MRS T1, named for site and transect alone
 
 # The grouped pane list of the Atlas control panel (program C spec 3.2 step 3):
-# group heading, then the tab keys under it in order. Review queue, Uploads
-# and Timelines join the Manual edit group in milestones C6 to C8.
+# group heading, then the tab keys under it in order. Uploads and Timelines
+# lead the Manual edit group (milestones C7 and C8); Review queue joins ahead
+# of them in milestone C6.
 NAV_GROUPS = [
     ("Records", ["order", "seasons", "prompts"]),
-    ("Manual edit", ["settings", "shelf", "manual"]),
+    ("Manual edit", ["uploads", "timelines", "settings", "shelf", "manual"]),
     ("Voyager", ["runs", "params", "rewind", "spot", "workbench"]),
     ("Desktop", ["locks", "modules", "appearance", "floors", "gpu"]),
     ("History", ["history"]),
 ]
 ALL_TABS = [key for _group, keys in NAV_GROUPS for key in keys]
+# The panel's scripts in load order: the pane seam first, then one script per
+# group of panes (program C spec 5.3).
+PANEL_SCRIPT_NAMES = ["voyager_tools.js", "vt_settings.js", "vt_uploads.js", "vt_timelines.js"]
+PANEL_SCRIPT_URLS = ["/voyager-tools/static/" + name + "?v=" + views.ASSET_VERSION for name in PANEL_SCRIPT_NAMES]
 
 SEED_V1 = """# params_version: 1.0.0
 # phase: voyager1
@@ -284,8 +289,7 @@ class Gates(ToolsCase):
         self.assertTrue(payload["html"].startswith('<section class="voyager-tools"'))
         self.assertTrue(payload["html"].rstrip().endswith("</section>"))
         self.assertIn("Lauren Olinger", payload["html"])
-        self.assertEqual(payload["scripts"], ["/voyager-tools/static/voyager_tools.js?v=" + views.ASSET_VERSION,
-                                              "/voyager-tools/static/vt_settings.js?v=" + views.ASSET_VERSION])
+        self.assertEqual(payload["scripts"], PANEL_SCRIPT_URLS)
         self.assertEqual(payload["styles"], ["/voyager-tools/static/voyager_tools.css?v=" + views.ASSET_VERSION])
         self.assertEqual(payload["base"], "/voyager-tools")
         self.assertEqual(payload["mount"], "VoyagerTools.mount")
@@ -302,7 +306,7 @@ class Gates(ToolsCase):
         self.assertEqual(views.fragment_status(payload), 401)
 
     def test_static_files_served(self):
-        for name in ("voyager_tools.js", "vt_settings.js", "voyager_tools.css"):
+        for name in PANEL_SCRIPT_NAMES + ["voyager_tools.css"]:
             r = self.client.get(f"/voyager-tools/static/{name}")
             self.assertEqual(r.status_code, 200, name)
         js = self.client.get("/voyager-tools/static/voyager_tools.js").get_data(as_text=True)
@@ -890,6 +894,25 @@ class PanelShape(ToolsCase):
         self.assertNotIn("admin gated", page.lower())
         self.assertNotIn("admin-gated", page.lower())
 
+    def test_uploads_and_timelines_panes_carry_their_parts(self):
+        page = self.page()
+        uploads = views.slice_section(page, '<section class="vt-pane" id="vt-uploads"')
+        for hook in ("uploads-ready", "uploads-tick-all", "uploads-untick-all", "uploads-start", "uploads-running",
+                     "uploads-review", "uploads-recent", "uploads-result", "uploads-refresh"):
+            with self.subTest(hook=hook):
+                self.assertIn(f'data-vt="{hook}"', uploads)
+        self.assertEqual(uploads.count("btn-primary"), 1)
+        self.assertIn(">Upload ticked</button>", uploads)
+        timelines = views.slice_section(page, '<section class="vt-pane" id="vt-timelines"')
+        for hook in ("tl-summary", "tl-projects", "tl-job", "tl-state", "tl-editor", "tl-since", "tl-clear",
+                     "tl-rows", "tl-csv", "tl-drawer", "tl-result", "tl-refresh"):
+            with self.subTest(hook=hook):
+                self.assertIn(f'data-vt="{hook}"', timelines)
+        self.assertIn('role="dialog"', timelines)
+        for label in ("tl-job", "tl-state", "tl-editor", "tl-since"):
+            with self.subTest(label=label):
+                self.assertIn(f'<label for="vt-{label}">', timelines)
+
     def test_panel_fragment_mounts_the_panel(self):
         self.unlock()
         r = self.client.get("/voyager-tools/fragment?tool=panel")
@@ -898,8 +921,7 @@ class PanelShape(ToolsCase):
         self.assertEqual(payload["mount"], "VoyagerTools.mountPanel")
         self.assertEqual(payload["ui_style"], "voyager_tools")
         self.assertTrue(payload["html"].startswith('<section class="voyager-tools"'))
-        self.assertEqual(payload["scripts"], ["/voyager-tools/static/voyager_tools.js?v=" + views.ASSET_VERSION,
-                                              "/voyager-tools/static/vt_settings.js?v=" + views.ASSET_VERSION])
+        self.assertEqual(payload["scripts"], PANEL_SCRIPT_URLS)
         self.assertEqual(payload["styles"], ["/voyager-tools/static/voyager_tools.css?v=" + views.ASSET_VERSION])
 
     def test_an_unknown_tool_is_refused_in_one_sentence(self):

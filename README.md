@@ -11,7 +11,7 @@ The list at the left is grouped, one pane at a time at the right:
 | Group | Panes |
 |---|---|
 | Records | Atlas edit, Camera model, Prompts doc |
-| Manual edit | Manual edit settings, Shelf copy, Clean manual edit run |
+| Manual edit | Uploads, Timelines, Manual edit settings, Shelf copy, Clean manual edit run |
 | Voyager | Voyager runs, Parameter defaults, Rewind, Spot redo, Clean workbench |
 | Desktop | Module locks, Module details, Appearance, Space floors, GPU ladder |
 | History | Settings history |
@@ -29,6 +29,11 @@ The settings panes (`static/vt_settings.js`, `templates/voyager_tools/panes_sett
 - **Settings history**: every line newest first, filtered by store, setting and day, with Copy as CSV and a line for each unreadable line and each Synology conflict copy.
 
 On the standalone host, which serves no `/api/settings` routes, a settings pane says the settings are served by the desktop.
+
+## Uploads and Timelines
+
+- **Uploads** (`static/vt_uploads.js`, `templates/voyager_tools/panes_manual_edit.html`): every transect marked for re-upload across the unfinished manual edit projects, each with a tick box; those an upload set holds now, with Watch; those in admin review, read only; and every upload set of the last 7 days with its state and Watch. Upload ticked checks the panel initials, reads the Shelf copy setting, asks for a confirmation naming each transect and what happens to its Shelf copy (renamed to `<folder>_voy1_archive` and kept, or replaced), and starts one upload set through the manual edit module's `POST /manual-edit/api/uploads`. The progress window is the editor's own component (`window.ManualEditUpload.mount` from the manual edit module's `static/manual_edit_upload.js`) in a dialog on the page body, so a relock that hides the panel leaves it open: the upload keeps running on the server, anyone may watch it, and Stop shows only in admin mode. On a host without the manual edit module the pane says so and offers nothing.
+- **Timelines** (`static/vt_timelines.js`, `voyagertools/timelines.py`, `voyagertools/manual_edit_views.py`): per manual edit project (created, Finish project pressed, completed, progress, transects by state, the pull while it runs) and per transect (pulled, time in editing, in Metashape with the opens that have no recorded close, in admin review, waiting for upload, uploaded, total, and the upload or checks window running now), newest first, filtered by project, state, editor and creation day, with Copy as CSV and a drawer holding the status history of every atlas row and every note of the transect. The status times come from the registry's status changes (the registry library's `state_intervals`, the time each status lasted, read from `events.csv`) inside the project's window, from its creation to the creation of the next project holding the same transect, and the Metashape time from the transect's open and close events (the manual edit job store's `edit_time`). The total stops at the upload, or when the project is cancelled or fails, or when a later project takes the transect. An upload shows only while its set is queued or running; a set a desktop restart stranded is marked interrupted before the pane reads it, and a set file that cannot be read is named on the row with the reason.
 
 ## The eight tools
 
@@ -58,9 +63,10 @@ Every save commits and, when the checkout has a remote, pushes to `laurenkolinge
 ## Layout
 
 - `voyagertools/views.py`: the blueprint `voyager_tools_bp` (page `/voyager-tools`, fragment `/voyager-tools/fragment`, JSON under `/voyager-tools/api/`), the two gates, and `deps`, one object of plain callables (registry, job store, parameter store, snapshots, rmtree, processing log, chunk runner, site names, prompts doc) that tests replace with fakes.
+- `voyagertools/manual_edit_views.py` and `voyagertools/timelines.py`: the Timelines routes on the same blueprint and the figures behind them, read only.
 - `voyagertools/order_tool.py`, `clean_workbench.py`, `clean_manual_edit.py`, `rewind.py`, `camera_tool.py`: the tool logic, pure where it can be, with the registry library, `manualedit.jobstore` and `paramsstore` doing every write.
 - `scripts/rewind_chunk.py`: the Metashape script (`metashape -r scripts/rewind_chunk.py <psx> --label <id> --out <json>`; `--fake` for tests).
-- `templates/voyager_tools/panel.html` (the fragment, root `<section class="voyager-tools">`, including `panes_settings.html`) and `index.html` (the standalone page); `static/voyager_tools.css` (scoped under `.voyager-tools`); `static/voyager_tools.js` (an IIFE extending `window.VoyagerTools` with `mount(el, opts)`, `mountPanel(el, {onClose, pane})` for the atlas, and `registerPane(key, init)`, the seam every later pane script uses); `static/vt_settings.js` (the settings, desktop and history panes).
+- `templates/voyager_tools/panel.html` (the fragment, root `<section class="voyager-tools">`, including `panes_manual_edit.html` and `panes_settings.html`) and `index.html` (the standalone page); `static/voyager_tools.css` (scoped under `.voyager-tools`); `static/voyager_tools.js` (an IIFE extending `window.VoyagerTools` with `mount(el, opts)`, `mountPanel(el, {onClose, pane})` for the atlas, and `registerPane(key, init)`, the seam every later pane script uses); `static/vt_settings.js` (the settings, desktop and history panes); `static/vt_uploads.js` and `static/vt_timelines.js` (the Uploads and Timelines panes).
 - `standalone_app.py`: a smoke-test host on port 5098 (`VOYAGER_TOOLS_ADMIN_PIN=... python3 standalone_app.py --port 5098`); the platform never starts it.
 - `voyagertools/paramsstore.py`, `params_schema_voyager1.yaml` and `params_schema_voyager2.yaml`: the voyagerparams reader and writer and the two editor schemas (plan task A7; program D milestone D1f for Voyager 2).
 
@@ -70,6 +76,8 @@ Every save commits and, when the checkout has a remote, pushes to `laurenkolinge
 |---|---|---|
 | GET /voyager-tools/fragment?tool=panel | | the panel for the atlas's Control panel tab (mount `VoyagerTools.mountPanel`); no tool is the desktop window; another tool is a 400 |
 | GET /voyager-tools/api/state | | order lock, unfinished manual edit projects, default versions, Workbench roots |
+| GET /voyager-tools/api/timelines?job=&state=&editor=&since= | | summary, projects and transect rows newest first (the filters narrow the rows only); 400 for a filter that does not parse, 503 `not_mounted` without the manual edit module |
+| GET /voyager-tools/api/timelines/detail?job=&psx= | | the registry status spells of every readable id of the transect and its notes, inside the project's window; 400 malformed, 404 unknown project or transect |
 | GET, POST /voyager-tools/api/order | {transects: [SITE_T#...], initials} | the order table; saved ids, count, first, last (409 when locked) |
 | POST /voyager-tools/api/order/lock, /unlock | {initials, confirm} | lock stamp, count, first, last |
 | GET /voyager-tools/api/workbench; POST .../workbench/delete | {path, initials, confirm} | folder plans; deleted path, bytes, log row (409 when not identical) |
@@ -85,7 +93,7 @@ Every write needs `initials` (two to four letters, the registry's rule) and ever
 
 ```bash
 cd /mnt/rip/vicarius_drive/vicarius/modules/voyager_tools/github_repo
-python3 -m unittest discover -s tests -q        # 246 tests on 2026-09-04
+python3 -m unittest discover -s tests -q        # 461 tests on 2026-09-27
 python3 tests/test_house_rules.py
 cd /mnt/rip/vicarius_drive/vicarius_ui_os && .venv/bin/python -m pytest tests/test_voyager_tools_host.py -q
 ```

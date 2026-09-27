@@ -10,6 +10,9 @@ Purpose: The web layer of the Atlas control panel (module voyager_tools;
          tab), and the JSON API of the eight tools: the processing order,
          clean workbench, clean manual edit run, rewind, spot redo, the
          prompts doc, the parameter defaults and the camera model table. The
+         Timelines routes live in manual_edit_views.py on the same
+         blueprint; the Uploads pane reads and starts uploads through the
+         manual edit module's own /manual-edit/api routes. The
          settings panes of the panel read and write the desktop's own
          /api/settings routes (vicarius_ui_os/settings_views.py), not routes
          of this blueprint. A parameter default or branch save is written
@@ -46,7 +49,7 @@ from functools import wraps
 from pathlib import Path
 
 import yaml
-from flask import Blueprint, g, jsonify, render_template, request, session
+from flask import Blueprint, current_app, g, jsonify, render_template, request, session
 
 from . import camera_tool, clean_manual_edit, clean_workbench, order_tool, rewind
 from . import paramsstore as ps
@@ -58,12 +61,15 @@ URL_PREFIX = "/voyager-tools"
 MODULE_SLUG = "voyager_tools"
 DISPLAY_NAME = "Atlas control panel"
 UI_STYLE = "voyager_tools"
-ASSET_VERSION = "20260927f"
+ASSET_VERSION = "20260927g"
 ROOT_SECTION_PREFIX = '<section class="voyager-tools"'
 STATIC_JS = "voyager_tools.js"
 STATIC_SETTINGS_JS = "vt_settings.js"  # the settings and desktop panes (program C spec 5.3)
+STATIC_UPLOADS_JS = "vt_uploads.js"  # the Uploads pane (milestone C7)
+STATIC_TIMELINES_JS = "vt_timelines.js"  # the Timelines pane (milestone C8)
 STATIC_CSS = "voyager_tools.css"
-PANEL_SCRIPTS = (STATIC_JS, STATIC_SETTINGS_JS)  # load order: the pane seam first
+# Load order: the pane seam first, then one script per group of panes.
+PANEL_SCRIPTS = (STATIC_JS, STATIC_SETTINGS_JS, STATIC_UPLOADS_JS, STATIC_TIMELINES_JS)
 TOOL_PARAM = "tool"
 TOOL_PANEL = "panel"
 MOUNT_WINDOW = "VoyagerTools.mount"
@@ -78,6 +84,9 @@ VICARIUS_ROOT = Path(os.environ.get("VICARIUS_ROOT") or "/mnt/rip/vicarius_drive
 DRIVE_ROOT = VICARIUS_ROOT.parent
 REGISTRY_LIB_DIR = VICARIUS_ROOT / "_METADATA" / "3d"
 MANUAL_EDIT_CLONE = VICARIUS_ROOT / "modules" / "manual_edit" / "github_repo"
+# The manual edit module's blueprint name: only an app that mounts it runs
+# its upload runner, so only there may a stranded upload set be recovered.
+MANUAL_EDIT_BLUEPRINT = "manual_edit"
 DRIVER_CLONE = VICARIUS_ROOT / "modules" / "driver" / "github_repo"
 NAS_YAML = DRIVER_CLONE / "config" / "nas.yaml"
 LOCKS_PATH = VICARIUS_ROOT / "_METADATA" / "module_locks.json"
@@ -155,6 +164,29 @@ def _jobstore_module():
 def _job_store_default():
     """A manual edit JobStore on the registry's root (so a test's temp root carries both)."""
     return _jobstore_module().JobStore(_registry_module().ROOT)
+
+
+def _recover_uploads_default(store) -> None:
+    """Mark every upload set a desktop restart stranded as interrupted, through the manual edit module's recovery.
+
+    Runs only in an app that mounts the manual edit blueprint, whose upload
+    runner knows which sets are live in this process; any other host (the
+    standalone panel) leaves the sets alone, since another process may be
+    running them. A recovery that stops is logged, never raised, as the
+    manual edit module's own routes do.
+
+    Parameters:
+        store: the manual edit JobStore the caller reads.
+    """
+    if MANUAL_EDIT_BLUEPRINT not in current_app.blueprints:
+        return
+    jobstore = _jobstore_module()
+    manual_views = importlib.import_module("manualedit.views")
+    transfers = importlib.import_module("manualedit.transfers")
+    try:
+        transfers.recover_stale_uploads(manual_views.get_deps(), store)
+    except jobstore.JobStoreError as exc:
+        current_app.logger.warning("voyager tools: the stale upload recovery stopped: %s", exc)
 
 
 def _active_jobs_default() -> list[dict]:
@@ -251,7 +283,9 @@ class Deps:
     prompts_doc() -> Path; now_iso() -> str; record_setting(phase, key,
     old_version, new_version, by, reason) -> the recorded time, the
     settings history line of a parameter save (the desktop wires
-    settings_stores.record_params_save; the default refuses).
+    settings_stores.record_params_save; the default refuses);
+    recover_uploads(store), the manual edit module's recovery of upload
+    sets a desktop restart stranded.
     """
 
     def __init__(self):
@@ -273,6 +307,7 @@ class Deps:
         self.prompts_doc: Callable[[], Path] = lambda: PROMPTS_DOC
         self.now_iso: Callable[[], str] = lambda: datetime.now(AST).isoformat(timespec="seconds")
         self.record_setting: Callable[..., str] = _record_setting_refused
+        self.recover_uploads: Callable = _recover_uploads_default
 
 
 deps = Deps()
@@ -1191,3 +1226,7 @@ __all__ = [
     "URL_PREFIX", "MODULE_SLUG", "DISPLAY_NAME", "UI_STYLE", "ASSET_VERSION", "ROOT_SECTION_PREFIX",
     "LOCK_MESSAGE", "ADMIN_ERROR", "ADMIN_MESSAGE", "PROMPTS_DOC", "PARAMS_HISTORY_ONLY_ON_DESKTOP",
 ]
+
+# The manual edit routes (the Timelines pane) register on the same blueprint;
+# imported last because they use the gates and seams defined above.
+from . import manual_edit_views  # noqa: E402,F401  (registers routes on voyager_tools_bp)

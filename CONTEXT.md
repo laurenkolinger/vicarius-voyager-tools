@@ -11,7 +11,7 @@ The name people see for this module since 2026-09-27: the one window holding the
 _Avoid_: Voyager tools (the old display name), admin page, admin gated settings
 
 **Pane**:
-One entry of the panel's grouped list (Records, Manual edit, Voyager, Desktop, History) and what it shows. The eight tools are panes; so are the settings panes, the read-only desktop panes and the Settings history.
+One entry of the panel's grouped list (Records, Manual edit, Voyager, Desktop, History) and what it shows. The eight tools are panes; so are Uploads and Timelines, the settings panes, the read-only desktop panes and the Settings history.
 _Avoid_: tab, panel (the panel is the whole window)
 
 **Tool**:
@@ -22,6 +22,14 @@ A pane that edits one settings file through the desktop's write path for it (`/a
 
 **Settings history**:
 `/mnt/rip/vicarius_drive/vicarius/_METADATA/settings_history.csv`, one line per changed setting: when, who, which store and key, the old and new value as JSON text, and the reason. Written only by the desktop, never rewritten.
+
+**Upload set**:
+The manual edit module's list of transects, possibly from several manual edit projects, uploaded to the Shelf one after another under one progress record (`UP-<YYYYMMDD>-<HHMMSS>-<initials>`). The Uploads pane starts one from the transects marked for re-upload and reopens any set of the last 7 days in the editor's own progress window; a set keeps running after admin mode ends, anyone may watch it and only an admin may stop it.
+_Avoid_: batch (a batch is a driver's group of Voyager turns), upload job
+
+**Timeline**:
+How long one transect of one manual edit project spent at each step, read in the Timelines pane: pulled to the edit bench, editing, open in Metashape, in admin review, waiting for upload, uploaded. The registry status times come from the status changes in `events.csv` (the registry library's `state_intervals`, the time each status lasted) inside the project's window, from its creation to the creation of the next project holding the same transect; the Metashape time comes from the transect's open and close events; nothing is a stored counter.
+_Avoid_: history (the settings history is another thing), log
 
 **Drift**:
 A setting whose value in its file differs from the last value the settings history holds for it, because the file changed outside the write path. The pane names it and **Record as found** writes the missing line with the typed initials and a reason.
