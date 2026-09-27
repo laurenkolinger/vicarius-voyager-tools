@@ -194,7 +194,8 @@ class Helpers(unittest.TestCase):
                          {"ok": "check-passed", "warn": "role-attention", "stop": "role-failed"})
         roles = ROLES_CSS.read_text(encoding="utf-8")
         for cls in ("stage-bench", "stage-review", "stage-upload", "stage-edited"):
-            self.assertIn(".chip." + cls + " {", roles, cls)
+            # the swatch leaves a legend's chips alone: the atlas legend draws its own bars
+            self.assertIn(".chip." + cls + ":not(.role-legend .chip) {", roles, cls)
         self.assertIn("--stage-review: #A56BFF;", roles)
         self.assertIn(".chip.check-passed {", PANEL_CSS.read_text(encoding="utf-8"))
 

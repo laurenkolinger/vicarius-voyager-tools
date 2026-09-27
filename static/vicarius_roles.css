@@ -184,10 +184,13 @@ tr.role-verified td { background: rgba(177, 89, 207, 0.08); }
   --stage-upload: #9BD13A;  /* marked for upload */
   --stage-edited: #4bbf73;  /* uploaded and verified */
 }
-.chip.stage-bench,
-.chip.stage-review,
-.chip.stage-upload,
-.chip.stage-edited {
+/* The atlas legend (a .role-legend list, static/atlas.js stageLegendHtml) draws
+   every stage as the same wide bar and fills it itself (static/atlas.css), so
+   these swatch rules leave any chip inside a legend alone. */
+.chip.stage-bench:not(.role-legend .chip),
+.chip.stage-review:not(.role-legend .chip),
+.chip.stage-upload:not(.role-legend .chip),
+.chip.stage-edited:not(.role-legend .chip) {
   display: inline-block;
   box-sizing: border-box;
   width: 12px;
@@ -199,7 +202,7 @@ tr.role-verified td { background: rgba(177, 89, 207, 0.08); }
   flex: none;
 }
 /* on the edit bench (registry status editing): the shared magenta, filled as the atlas legend fills it. */
-.chip.stage-bench { background: var(--magenta, #E20074); border: 1px solid var(--magenta, #E20074); }
-.chip.stage-review { background: var(--stage-review); border: 1px solid var(--stage-review); }
-.chip.stage-upload { background: var(--stage-upload); border: 1px solid var(--stage-upload); }
-.chip.stage-edited { background: var(--stage-edited); border: 1px solid var(--stage-edited); }
+.chip.stage-bench:not(.role-legend .chip) { background: var(--magenta, #E20074); border: 1px solid var(--magenta, #E20074); }
+.chip.stage-review:not(.role-legend .chip) { background: var(--stage-review); border: 1px solid var(--stage-review); }
+.chip.stage-upload:not(.role-legend .chip) { background: var(--stage-upload); border: 1px solid var(--stage-upload); }
+.chip.stage-edited:not(.role-legend .chip) { background: var(--stage-edited); border: 1px solid var(--stage-edited); }
