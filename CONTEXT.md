@@ -40,12 +40,12 @@ A folder whose name ends in `_3dprocessing` found at most four levels under a Wo
 The name-and-size diff between a local snapshot (`driver.verify.local_snapshot`) and a remote snapshot (`driver.remote.snapshot`) of one processing folder, with the `.processing.lock` control file left out of both sides. Its outcome is one of identical, differs, no registry row, not on the Shelf, processing right now, or error.
 
 **Edit bench copy**:
-The local folder of one transect under the edit bench (the folder VICARIUS owns for a manual edit job). Cancel and prune removes it only when the job never reached the push to the Shelf; after a push it is kept as the complete record.
+The local folder of one transect under the edit bench (the folder VICARIUS owns for manual edit projects). Cancel and prune removes it only when the project never reached the push to the Shelf and no transect holds a certified edit; after a push it is kept as the complete record.
 
 ## Rewind
 
 **Rewind**:
-Taking one timepoint back to before step 1 (the Metashape reconstruction) or before step 0 (the frame extraction): the report and frames move into the rewind folder, the chunk leaves the shared project, the `status.csv` cells clear and the registry cells reset with one event each. Nothing is deleted.
+Taking one timepoint back to before step 1 (the Metashape reconstruction) or before step 0 (the frame extraction): the report and frames move into the rewind folder, the chunk leaves the shared project, the `status.csv` cells clear and the registry cells reset with one event each, through the registry's named reset `rewind`. A row whose manual edit is under way (`editing`, `review`, `upload`) is refused. Nothing is deleted.
 _Avoid_: reset, rollback, undo
 
 **Rewind folder**:

@@ -307,7 +307,7 @@ class Gates(ToolsCase):
         self.assertEqual(r.status_code, 200)
         data = r.get_json()
         self.assertFalse(data["order"]["locked"])
-        self.assertIsNone(data["manual_edit"])
+        self.assertEqual(data["manual_edit"], [])
         self.assertEqual(data["params_default"], {"voyager1": "v1.0.0", "voyager2": "v0.1.0"})
         self.assertEqual(data["workbench_roots"], [str(self.workbench)])
 
@@ -433,38 +433,133 @@ class ManualEditRoutes(ToolsCase):
         self.registry.upsert(RID_DONE, {"manual_edit_status": "editing", "processing_location": str(local)}, "seed")
         return job, local
 
+    def cancel(self, **body):
+        """POST the cancel route with a confirmed body plus `body`."""
+        return self.client.post("/voyager-tools/api/manual-edit/cancel", json=dict({"initials": "LO", "confirm": True},
+                                                                                  **body))
+
+    def second_project(self, first):
+        """A second unfinished project on another transect (RID_LBH, its own bench folder), and a store
+        whose active_jobs() lists both (the job store answers only one active job until program B's B1
+        ships active_jobs)."""
+        folder = "LBH_T2_3D"
+        (self.bench / folder).mkdir()
+        record = dict(first, job_id="ME-20260927-020000-CC", created_by="CC", projects={},
+                      rows=[{"readable_id": RID_LBH, "site": "LBH", "transect": "T2", "processing_folder": folder,
+                             "shelf_location": f"{SHELF_PARENT}/{folder}", "local_path": str(self.bench / folder),
+                             "psx_basename": "LBH_T2_2025_2025.psx"}])
+        self.jobs.save_job(record)
+        self.registry.upsert(RID_LBH, {"manual_edit_status": "editing"}, "seed")
+        jobs = self.jobs
+
+        class ManyProjects(jobstore.JobStore):
+            def active_jobs(self):
+                found = [self.load_job(j["job_id"]) for j in self.list_jobs() if not j.get("corrupt")]
+                return sorted((j for j in found if j["phase"] not in jobstore.TERMINAL_PHASES),
+                              key=lambda j: j["job_id"])
+        many = ManyProjects(str(self.reg_root))
+        views.deps.job_store = lambda: many
+        return record, jobs
+
     def test_no_job(self):
         self.unlock()
-        self.assertIsNone(self.client.get("/voyager-tools/api/manual-edit").get_json()["job"])
-        r = self.client.post("/voyager-tools/api/manual-edit/cancel", json={"initials": "LO", "confirm": True})
+        self.assertEqual(self.client.get("/voyager-tools/api/manual-edit").get_json(), {"jobs": []})
+        r = self.cancel(job_id="ME-20260101-000000-ZZ")
         self.assertEqual(r.status_code, 409)
+        self.assertIn("is not an unfinished manual edit project", r.get_json()["error"])
+
+    def test_cancel_names_the_project(self):
+        self.unlock()
+        job, local = self.make_job()
+        self.jobs.transition(job["job_id"], "pulling", "LO")
+        self.jobs.transition(job["job_id"], "editing", "LO")
+        for bad in (None, "", "   ", 7, ["x"], "x" * 200, "ME-2026-01-LO", "../" + job["job_id"],
+                    "ME-20260101-000000-" + "A" * 40):
+            with self.subTest(job_id=bad):
+                r = self.cancel(**({} if bad is None else {"job_id": bad}))
+                self.assertEqual(r.status_code, 400)
+                self.assertTrue(local.exists())
+        self.assertEqual(self.registry.get(RID_DONE)["manual_edit_status"], "editing")
 
     def test_summary_and_cancel(self):
         self.unlock()
         job, local = self.make_job()
         self.jobs.transition(job["job_id"], "pulling", "LO")
         r = self.client.get("/voyager-tools/api/manual-edit")
-        summary = r.get_json()["job"]
+        summary = r.get_json()["jobs"][0]
         self.assertEqual(summary["phase"], "pulling")
         self.assertFalse(summary["can_cancel"])
-        r = self.client.post("/voyager-tools/api/manual-edit/cancel", json={"initials": "LO", "confirm": True})
+        r = self.cancel(job_id=job["job_id"])
         self.assertEqual(r.status_code, 409)
         self.jobs.transition(job["job_id"], "editing", "LO")
         self.jobs.append_log(job["job_id"], "pulled")
-        summary = self.client.get("/voyager-tools/api/manual-edit").get_json()["job"]
+        summary = self.client.get("/voyager-tools/api/manual-edit").get_json()["jobs"][0]
         self.assertTrue(summary["can_cancel"])
         self.assertEqual(summary["rows"][0]["site_name"], "")
         self.assertTrue(summary["log_tail"][0].endswith("pulled"))
-        r = self.client.post("/voyager-tools/api/manual-edit/cancel", json={"initials": "LO"})
+        r = self.client.post("/voyager-tools/api/manual-edit/cancel", json={"initials": "LO", "job_id": job["job_id"]})
         self.assertEqual(r.status_code, 400)
-        r = self.client.post("/voyager-tools/api/manual-edit/cancel", json={"initials": "LO", "confirm": True})
+        r = self.cancel(job_id=f"  {job['job_id']} ")
         self.assertEqual(r.status_code, 200, r.get_json())
         self.assertEqual(r.get_json()["phase"], "cancelled")
+        self.assertIsNone(r.get_json()["restored"][0]["status_kept"])
         self.assertFalse(local.exists())
         self.assertEqual(self.registry.get(RID_DONE)["manual_edit_status"], "awaiting")
         self.assertEqual(self.registry.get(RID_DONE)["processing_location"], f"{SHELF_PARENT}/{FOLDER}")
         self.assertIsNone(self.jobs.current())
-        self.assertIsNone(self.client.get("/voyager-tools/api/manual-edit").get_json()["job"])
+        self.assertEqual(self.client.get("/voyager-tools/api/manual-edit").get_json()["jobs"], [])
+        r = self.cancel(job_id=job["job_id"])
+        self.assertEqual(r.status_code, 409)
+
+    def test_the_summary_carries_the_registry_refusal(self):
+        self.unlock()
+        job, local = self.make_job()
+        self.jobs.transition(job["job_id"], "pulling", "LO")
+        self.jobs.transition(job["job_id"], "editing", "LO")
+        rows = self.registry._read_rows()
+        for row in rows:
+            if row["readable_id"] == RID_DONE:
+                row["manual_edit_status"] = "review"
+        self.registry._write_rows(rows)
+        summary = self.client.get("/voyager-tools/api/manual-edit").get_json()["jobs"][0]
+        self.assertFalse(summary["can_cancel"])
+        self.assertIn("certified edit", summary["refusal"])
+        r = self.cancel(job_id=job["job_id"])
+        self.assertEqual(r.status_code, 409)
+        self.assertTrue(local.exists())
+
+    def test_every_unfinished_project_is_listed_and_cancelled_on_its_own(self):
+        self.unlock()
+        first, local = self.make_job()
+        second, _jobs = self.second_project(first)
+        data = self.client.get("/voyager-tools/api/manual-edit").get_json()
+        self.assertEqual([j["job_id"] for j in data["jobs"]], sorted([first["job_id"], second["job_id"]]))
+        state = self.client.get("/voyager-tools/api/state").get_json()["manual_edit"]
+        self.assertEqual(sorted(j["job_id"] for j in state), sorted([first["job_id"], second["job_id"]]))
+        rows = {r["readable_id"]: r for r in self.client.get("/voyager-tools/api/rewind/rows").get_json()["rows"]}
+        self.assertTrue(rows[RID_DONE]["in_job"])
+        r = self.cancel(job_id=second["job_id"])
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertEqual(self.registry.get(RID_LBH)["manual_edit_status"], "awaiting")
+        self.assertEqual(r.get_json()["pruned"], [os.path.realpath(self.bench / "LBH_T2_3D")])
+        self.assertEqual(self.registry.get(RID_DONE)["manual_edit_status"], "editing")
+        self.assertTrue(local.exists())
+        left = self.client.get("/voyager-tools/api/manual-edit").get_json()["jobs"]
+        self.assertEqual([j["job_id"] for j in left], [first["job_id"]])
+
+    def test_the_default_seam_falls_back_to_the_one_active_job(self):
+        job, _local = self.make_job()
+        fresh = views.Deps()
+        fresh.job_store = lambda: self.jobs
+        views.deps.job_store = lambda: self.jobs
+        self.assertFalse(hasattr(self.jobs, "active_jobs") and callable(getattr(self.jobs, "active_jobs")))
+        self.assertEqual([j["job_id"] for j in fresh.active_jobs()], [job["job_id"]])
+
+        class Lister:
+            def active_jobs(self):
+                return [{"job_id": "a"}, {"job_id": "b"}]
+        views.deps.job_store = lambda: Lister()
+        self.assertEqual([j["job_id"] for j in fresh.active_jobs()], ["a", "b"])
 
     def test_corrupt_pointer_is_a_500_line(self):
         self.unlock()
@@ -534,9 +629,45 @@ class RewindRoutes(ToolsCase):
               "shelf_location": "/s", "psx_basename": "x.psx"}], str(self.bench), "LO", 1, 1)
         r = self.client.post("/voyager-tools/api/rewind/plan", json={"readable_id": RID_DONE})
         self.assertEqual(r.status_code, 409)
-        self.assertIn("manual edit job", r.get_json()["error"])
+        self.assertIn("unfinished manual edit project", r.get_json()["error"])
         rows = self.client.get("/voyager-tools/api/rewind/rows").get_json()["rows"]
         self.assertTrue(rows[0]["in_job"])
+
+    def test_a_row_after_the_pull_is_refused_even_with_no_project_listed(self):
+        self.unlock()
+        rows = self.client.get("/voyager-tools/api/rewind/rows").get_json()["rows"]
+        self.assertFalse(rows[0]["manual_edit_under_way"])
+        for status in ("editing", "review", "upload"):
+            with self.subTest(status=status):
+                self.registry.upsert(RID_DONE, {"manual_edit_status": status}, "seed")
+                rows = self.client.get("/voyager-tools/api/rewind/rows").get_json()["rows"]
+                self.assertTrue(rows[0]["manual_edit_under_way"])
+                for route in ("/voyager-tools/api/rewind/plan", "/voyager-tools/api/rewind/apply",
+                              "/voyager-tools/api/spot-redo"):
+                    r = self.client.post(route, json={"readable_id": RID_DONE, "initials": "LO", "confirm": True})
+                    self.assertEqual(r.status_code, 409, route)
+                    self.assertIn("on the edit bench in a manual edit project", r.get_json()["error"])
+                self.assertEqual(json.loads(self.psx.read_text())["chunks"], [RID_DONE])
+                self.assertEqual(self.registry.get(RID_DONE)["step1_status"], "complete")
+
+
+    def test_an_unreadable_job_store_stops_the_rewind_but_not_the_lists(self):
+        """Without the job store the project guard is unknown, so plan, apply and spot redo answer 500;
+        the row list and the state still load, with no row marked as in a project."""
+        self.unlock()
+        (self.reg_root / "manual_edit").mkdir()
+        (self.reg_root / "manual_edit" / "current.json").write_text("{not json")
+        for route in ("/voyager-tools/api/rewind/plan", "/voyager-tools/api/rewind/apply",
+                      "/voyager-tools/api/spot-redo"):
+            r = self.client.post(route, json={"readable_id": RID_DONE, "initials": "LO", "confirm": True})
+            self.assertEqual(r.status_code, 500, route)
+            self.assertIn("cannot be read", r.get_json()["error"])
+        self.assertEqual(json.loads(self.psx.read_text())["chunks"], [RID_DONE])
+        self.assertEqual(self.registry.get(RID_DONE)["step1_status"], "complete")
+        r = self.client.get("/voyager-tools/api/rewind/rows")
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.get_json()["rows"][0]["in_job"])
+        self.assertEqual(self.client.get("/voyager-tools/api/state").status_code, 200)
 
 
 class PromptsRoutes(ToolsCase):

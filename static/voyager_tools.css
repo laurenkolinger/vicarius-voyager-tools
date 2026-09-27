@@ -154,6 +154,13 @@
 .voyager-tools .vt-problems { margin: 0 0 8px; padding-left: 18px; color: var(--warning, #FFB800); font-size: 12px; }
 .voyager-tools .vt-problems:empty { display: none; }
 
+/* -- one block per unfinished manual edit project ------------------------- */
+.voyager-tools .vt-me-project + .vt-me-project {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-dim, #1d1d26);
+}
+
 /* -- the rewind plan and the diff list ------------------------------------ */
 .voyager-tools .vt-plan:empty, .voyager-tools .vt-diff:empty { display: none; }
 .voyager-tools .vt-plan {

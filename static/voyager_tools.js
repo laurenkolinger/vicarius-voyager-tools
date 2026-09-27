@@ -18,7 +18,7 @@
  * because the desktop closes a window on a bubbled Escape.
  *
  * Every result list (the processing order, the Workbench folders, the
- * parameter versions, the seasons table, a manual edit job's rows, a
+ * parameter versions, the seasons table, each manual edit project's rows, a
  * rewind plan) renders as the shared block's .rows / .row shape rather than
  * an HTML table; every choice is a .choices definition-list row with a
  * "?" glyph; every button is .btn / .btn-primary / .btn-danger / .btn-mini.
@@ -736,63 +736,74 @@
     function loadManual() {
       return api("/api/manual-edit").then(function (res) {
         if (!res.ok) { fail(meResult, res); return; }
-        renderManual(res.data.job);
+        renderManual(res.data.jobs);
       });
     }
 
-    function renderManual(job) {
-      var host = q(root, "me-summary");
-      var cancel = q(root, "me-cancel");
-      if (!job) {
-        host.innerHTML = '<p class="count">No manual edit job is current.</p>';
-        cancel.disabled = true;
-        return;
-      }
-      cancel.disabled = !job.can_cancel;
+    var CANCEL_TIP = "Cancel this project after the confirmation. VICARIUS marks it cancelled, returns each row still at editing to awaiting with its Shelf location, and removes the edit bench copies when the project never reached the push to the Shelf.";
+
+    function projectHtml(job) {
       var onCancel = job.refusal ? esc(job.refusal)
         : (job.will_prune ? "the edit bench copies are removed: " + esc(job.prune_targets.join(", ") || "none on disk")
-                          : "the local copies are kept (the job reached the push to the Shelf)");
-      host.innerHTML =
+                          : "the local copies are kept (the project reached the push to the Shelf)");
+      return '<div class="vt-me-project" data-job-id="' + esc(job.job_id) + '" data-job-rows="' + job.rows.length + '">' +
         '<dl class="choices">' +
-        '<div><dt>Job</dt><dd>' + esc(job.job_id) + " (" + esc(job.phase) + ")</dd></div>" +
-        "<div><dt>Created</dt><dd>" + esc(job.created_at) + " by " + esc(job.created_by) + "</dd></div>" +
+        '<div><dt>Project</dt><dd>' + esc(job.job_id) + " (" + esc(job.phase) + ")</dd></div>" +
+        "<div><dt>Created</dt><dd>" + esc(stampWords(job.created_at)) + " by " + esc(job.created_by) + "</dd></div>" +
         '<div><dt>Edit bench</dt><dd><span class="id">' + esc(job.edit_bench) + "</span></dd></div>" +
         "<div><dt>On cancel</dt><dd>" + onCancel + "</dd></div>" +
         "</dl>" +
-        '<ul class="rows" aria-label="The rows of this job">' + job.rows.map(function (r) {
+        '<ul class="rows" aria-label="The rows of project ' + esc(job.job_id) + '">' + job.rows.map(function (r) {
           return '<li class="row"><span class="row-name">' + idChip(r.readable_id) + '</span><span class="row-meta">' +
             siteLabel(r.site_name, r.site) + " " + idChip(r.transect) + " back to " + esc(r.shelf_location || "?") + "</span></li>";
         }).join("") + "</ul>" +
         '<details class="src"><summary>History (' + job.history.length + ')</summary><ul>' + job.history.map(function (h) {
-          return "<li>" + esc(h.at) + " " + esc(h.phase) + " by " + esc(h.by) + (h.reason ? ": " + esc(h.reason) : "") + "</li>";
+          return "<li>" + esc(stampWords(h.at)) + " " + esc(h.phase) + " by " + esc(h.by) + (h.reason ? ": " + esc(h.reason) : "") + "</li>";
         }).join("") + "</ul></details>" +
-        '<details class="src"><summary>Log tail (' + job.log_tail.length + ')</summary><pre class="vt-log">' + esc(job.log_tail.join("\n") || "(empty)") + "</pre></details>";
-      host.setAttribute("data-job-id", job.job_id);
-      host.setAttribute("data-job-rows", String(job.rows.length));
+        '<details class="src"><summary>Log tail (' + job.log_tail.length + ')</summary><pre class="vt-log">' + esc(job.log_tail.join("\n") || "(empty)") + "</pre></details>" +
+        '<div class="actions"><button type="button" class="btn btn-danger" data-vt-cancel="' + esc(job.job_id) + '"' +
+        (job.can_cancel ? "" : " disabled") + ' title="' + esc(CANCEL_TIP) + '">Cancel and prune</button></div>' +
+        "</div>";
+    }
+
+    function renderManual(jobs) {
+      var host = q(root, "me-summary");
+      host.innerHTML = jobs.length ? jobs.map(projectHtml).join("")
+        : '<p class="count">No manual edit project is unfinished.</p>';
+    }
+
+    function cancelResultText(d) {
+      var reset = d.restored.filter(function (r) { return r.status_reset; }).length;
+      var kept = d.restored.filter(function (r) { return r.status_kept !== null; });
+      var text = "Project " + esc(d.job_id) + " is " + esc(d.phase) + ": " + reset + " row" + (reset === 1 ? "" : "s") + " back to awaiting, " +
+        d.pruned.length + " local cop" + (d.pruned.length === 1 ? "y" : "ies") + " removed" + (d.kept.length ? ", " + d.kept.length + " kept" : "") + ".";
+      if (kept.length) {
+        text += " Status left as it was: " + kept.map(function (r) { return esc(r.readable_id) + " (" + esc(r.status_kept || "blank") + ")"; }).join(", ") + ".";
+      }
+      if (d.warnings.length) text += " " + esc(d.warnings.join(" "));
+      if (d.problems.length) text += " " + esc(d.problems.join(" "));
+      return text;
     }
 
     q(root, "me-refresh").addEventListener("click", loadManual);
-    q(root, "me-cancel").addEventListener("click", function () {
+    q(root, "me-summary").addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-vt-cancel]");
+      if (!btn || btn.disabled) return;
       var who = initials(meResult);
       if (!who) return;
-      var host = q(root, "me-summary");
-      var jobId = host.getAttribute("data-job-id") || "";
-      var rows = host.getAttribute("data-job-rows") || "0";
+      var block = btn.closest(".vt-me-project");
+      var jobId = block.getAttribute("data-job-id") || "";
+      var rows = block.getAttribute("data-job-rows") || "0";
       confirmDialog({
-        title: "Cancel and prune the manual edit job",
-        lines: ["Cancel job " + jobId + " with " + rows + " row" + (rows === "1" ? "" : "s") + ".",
-                "VICARIUS restores each row's processing location to the Shelf, sets manual_edit_status back to awaiting, removes the edit bench copies when the job never reached the push, and clears the current job."],
+        title: "Cancel and prune the manual edit project",
+        lines: ["Cancel project " + jobId + " with " + rows + " row" + (rows === "1" ? "" : "s") + ".",
+                "VICARIUS returns each row still at editing to awaiting with its Shelf location, leaves a row at done as it is, and removes the edit bench copies when the project never reached the push."],
         okLabel: "Cancel and prune"
       }).then(function (ok) {
         if (!ok) return;
-        api("/api/manual-edit/cancel", { method: "POST", body: { initials: who, confirm: true } }).then(function (res) {
+        api("/api/manual-edit/cancel", { method: "POST", body: { job_id: jobId, initials: who, confirm: true } }).then(function (res) {
           if (!res.ok) { fail(meResult, res); return; }
-          var d = res.data;
-          var text = "Job " + esc(d.job_id) + " is " + esc(d.phase) + ": " + d.restored.length + " row" + (d.restored.length === 1 ? "" : "s") + " restored, " +
-            d.pruned.length + " local cop" + (d.pruned.length === 1 ? "y" : "ies") + " removed" + (d.kept.length ? ", " + d.kept.length + " kept" : "") + ".";
-          if (d.warnings.length) text += " " + esc(d.warnings.join(" "));
-          if (d.problems.length) text += " " + esc(d.problems.join(" "));
-          setResult(meResult, text, d.problems.length ? "warn" : "");
+          setResult(meResult, cancelResultText(res.data), res.data.problems.length ? "warn" : "");
           loadManual();
         });
       });
@@ -820,7 +831,7 @@
           if (!res.ok) { fail(resultEl, res); return; }
           var rows = res.data.rows;
           select.innerHTML = rows.map(function (r) {
-            var note = r.in_job ? " (in the manual edit job)" : (!r.local ? " (on the NAS)" : "") + (r.run_state === "running" ? " (running)" : "");
+            var note = r.in_job ? " (in a manual edit project)" : r.manual_edit_under_way ? " (manual edit under way)" : (!r.local ? " (on the NAS)" : "") + (r.run_state === "running" ? " (running)" : "");
             var label = r.readable_id + "  " + (r.site_name || r.site) + " " + r.transect + " " + r.year + (r.season_token === "_pbl" ? " spring" : " annual") + "  " + (r.step1_status || r.stage || "started") + note;
             return '<option value="' + esc(r.readable_id) + '">' + esc(label) + "</option>";
           }).join("") || '<option value="">No row has been touched by Voyager 1 yet</option>';

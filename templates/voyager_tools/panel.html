@@ -17,7 +17,7 @@
            vicarius_roles.css; every other rule is page-specific, scoped
            under .voyager-tools in static/voyager_tools.css.
 #}
-<section class="voyager-tools" id="vt-root" data-vt-base="/voyager-tools" data-vt-version="20260906a">
+<section class="voyager-tools" id="vt-root" data-vt-base="/voyager-tools" data-vt-version="20260927b">
 
   <header class="head">
     <h1 class="title" id="vt-title">Voyager tools</h1>
@@ -38,7 +38,7 @@
     <nav class="vt-nav" role="tablist" aria-label="Tools" aria-orientation="vertical">
       <button type="button" class="vt-tab" role="tab" data-vt-tab="order" aria-controls="vt-order" aria-selected="true" title="Show the processing order table: reorder the transects Voyager 1 has not started, save the order, and lock it in.">Atlas edit</button>
       <button type="button" class="vt-tab" role="tab" data-vt-tab="workbench" aria-controls="vt-workbench" aria-selected="false" title="Show every processing folder left on the Workbench with its Shelf comparison, and delete the copies that match.">Clean workbench</button>
-      <button type="button" class="vt-tab" role="tab" data-vt-tab="manual" aria-controls="vt-manual" aria-selected="false" title="Show the manual edit job in progress and cancel it when it went wrong.">Clean manual edit run</button>
+      <button type="button" class="vt-tab" role="tab" data-vt-tab="manual" aria-controls="vt-manual" aria-selected="false" title="Show every unfinished manual edit project and cancel one that went wrong.">Clean manual edit run</button>
       <button type="button" class="vt-tab" role="tab" data-vt-tab="rewind" aria-controls="vt-rewind" aria-selected="false" title="Take one timepoint back to before step 1 or before step 0, after a dry run lists what would change.">Rewind</button>
       <button type="button" class="vt-tab" role="tab" data-vt-tab="spot" aria-controls="vt-spot" aria-selected="false" title="Rewind one timepoint to before step 1 and mark it for another Voyager 1 run.">Spot redo</button>
       <button type="button" class="vt-tab" role="tab" data-vt-tab="prompts" aria-controls="vt-prompts" aria-selected="false" title="Show the back-of-house guide to cataloguing a season and the prompts to give an agent.">Prompts doc</button>
@@ -100,12 +100,11 @@
       <section class="vt-pane" id="vt-manual" role="tabpanel" data-vt-pane="manual" aria-labelledby="vt-manual-h" hidden>
         <div class="pane-head">
           <h2 id="vt-manual-h">Clean manual edit run</h2>
-          <button type="button" class="tip" aria-label="About manual edit jobs" title="A manual edit job brings finished reconstructions down to the edit bench, a local folder VICARIUS owns, for hand edits in Metashape and certification; one job runs at a time. Cancelling it here puts every row back to awaiting with its Shelf location and clears the current-job pointer."><span>i</span></button>
+          <button type="button" class="tip" aria-label="About manual edit projects" title="A manual edit project brings finished reconstructions down to the edit bench, a local folder VICARIUS owns, for hand edits in Metashape and certification; several projects may be unfinished at once. Cancelling one returns each of its rows still at editing to awaiting with its Shelf location and leaves a row at done as it is; a row at review or upload stops the cancel."><span>i</span></button>
         </div>
         <div data-vt="me-summary"></div>
         <div class="actions">
           <button type="button" class="btn" data-vt="me-refresh">Refresh</button>
-          <button type="button" class="btn btn-danger" data-vt="me-cancel" title="Cancel the current manual edit job after the confirmation. VICARIUS marks it cancelled, removes the edit bench copies when the job never reached the push to the Shelf, restores each row's processing location and sets manual_edit_status back to awaiting.">Cancel and prune</button>
         </div>
         <p class="result" data-vt="me-result" role="status"></p>
       </section>
@@ -114,7 +113,7 @@
       <section class="vt-pane" id="vt-rewind" role="tabpanel" data-vt-pane="rewind" aria-labelledby="vt-rewind-h" hidden>
         <div class="pane-head">
           <h2 id="vt-rewind-h">Rewind</h2>
-          <button type="button" class="tip" aria-label="About rewinds" title="A rewind takes one timepoint back to before step 1 (the Metashape reconstruction) or before step 0 (the frame extraction): its report and frames move into the processing folder's _rewind/&lt;stamp&gt;/ folder, its chunk leaves the shared project through Metashape, its status.csv cells clear and its registry cells reset with one event each. VICARIUS refuses while the row is processing, while its folder is on the NAS, or while the row sits in the manual edit job."><span>i</span></button>
+          <button type="button" class="tip" aria-label="About rewinds" title="A rewind takes one timepoint back to before step 1 (the Metashape reconstruction) or before step 0 (the frame extraction): its report and frames move into the processing folder's _rewind/&lt;stamp&gt;/ folder, its chunk leaves the shared project through Metashape, its status.csv cells clear and its registry cells reset with one event each. VICARIUS refuses while the row is processing, while its manual edit is under way (editing, review or upload), while its folder is on the NAS, or while the row sits in an unfinished manual edit project."><span>i</span></button>
         </div>
         <dl class="choices">
           <div>
@@ -145,7 +144,7 @@
         </div>
         <dl class="choices">
           <div>
-            <dt><label for="vt-sr-row">Timepoint</label><button type="button" class="tip" aria-label="About the timepoint choice" title="Choose the timepoint to redo. VICARIUS lists every row Voyager 1 has touched and refuses one whose folder is on the NAS or that sits in the manual edit job."><span>?</span></button></dt>
+            <dt><label for="vt-sr-row">Timepoint</label><button type="button" class="tip" aria-label="About the timepoint choice" title="Choose the timepoint to redo. VICARIUS lists every row Voyager 1 has touched and refuses one whose folder is on the NAS or whose manual edit is under way."><span>?</span></button></dt>
             <dd><select id="vt-sr-row" class="vt-field" data-vt="sr-row"></select></dd>
           </div>
         </dl>
