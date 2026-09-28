@@ -171,6 +171,15 @@ class TimelinesHelpers(unittest.TestCase):
         self.assertEqual(out, [["MRS_T2_2023_2024.psx", "MRS_T1_2023_2025.psx"], ["MRS_T1_2023_2025.psx"],
                                ["MRS_T2_2023_2024.psx"], ["MRS_T1_2023_2025.psx"], ["MRS_T2_2023_2024.psx"], [], []])
 
+    def test_a_row_with_no_editor_says_so_and_the_open_chip_counts_in_words(self):
+        """V-claim-audit-3: the drawer names no creator for a blank editor; the chip reads +1 open, +7 opens."""
+        source = TIMELINES_JS.read_text(encoding="utf-8")
+        self.assertIn('(row.editor ? "editor " + row.editor : LINE_NO_EDITOR)', source)
+        self.assertIn('var LINE_NO_EDITOR = "no editor on record";', source)
+        self.assertIn('esc(plural(n, "open"))', source)
+        self.assertNotIn('" open</span>"', source)
+        self.assertIn("carried over from the older job record", source)
+
     def test_rows_to_csv_quotes_every_cell_and_guards_formulas(self):
         text = run_node(TIMELINES_JS, "return h.rowsToCsv(" + json.dumps(ROWS) + ", [{key: 'psx', label: 'Transect'},"
                                       " {key: 'editing_s', label: 'Editing (s)'}, {key: 'last_note', label: 'Last note'},"

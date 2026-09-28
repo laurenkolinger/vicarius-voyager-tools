@@ -126,12 +126,25 @@ class QueueItems(unittest.TestCase):
         self.assertEqual([i["psx"] for i in out["items"]], [PSX["T4"], PSX["T2"]])
         self.assertEqual(out["items"][0]["site_name"], "Lang Bank Red Hind FSA")
 
-    def test_editor_falls_back_to_the_project_creator_and_counts_to_zero(self):
+    def test_with_no_certifier_and_no_signed_open_no_editor_is_named_and_counts_are_zero(self):
+        """V-claim-audit-3: the queue never names the project's creator (CC) as the editor."""
         records = jobs()
-        records[0]["projects"][PSX["T2"]] = {"state": "review", "round": 0}
+        records[0]["projects"][PSX["T2"]] = {"state": "review", "round": 0,
+                                             "opens": [{"event": "open", "at": "2026-09-27T08:00:00-04:00", "by": ""},
+                                                       {"event": "close", "at": "2026-09-27T09:00:00-04:00",
+                                                        "by": ""}]}
         item = queue(rows(review=T2), records)["items"][0]
         self.assertEqual((item["editor"], item["confirmed_at"], item["failed_checks"], item["warned_checks"]),
-                         ("CC", "", 0, 0))
+                         ("", "", 0, 0))
+
+    def test_with_no_certifier_the_last_live_opener_is_the_editor_and_a_migrated_open_is_skipped(self):
+        """The same order as the review content: certifier, else the last live open naming a person."""
+        records = jobs()
+        records[0]["projects"][PSX["T2"]] = {"state": "review", "round": 0, "opens": [
+            {"event": "open", "at": "2026-09-26T08:00:00-04:00", "by": "XY"},
+            {"event": "close", "at": "2026-09-26T09:00:00-04:00", "by": "XY"},
+            {"event": "open", "at": "2026-09-27T08:00:00-04:00", "by": "CC", "legacy": True}]}
+        self.assertEqual(queue(rows(review=T2), records)["items"][0]["editor"], "XY")
 
     def test_a_stopped_start_over_is_listed_with_its_stage_and_error(self):
         out = queue(rows(others=T3), jobs())

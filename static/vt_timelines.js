@@ -82,7 +82,11 @@
   var LINE_NO_PROJECTS = "No manual edit project recorded yet.";
   var LINE_BAD_DAY = "Type the first day as YYYY-MM-DD, for example 2026-09-27.";
   var TIP_OPEN_ROW = "Show the status history and the notes of this transect.";
-  var TIP_UNKNOWN_OPENS = "VICARIUS found {n} with no recorded close, so the Metashape time leaves them out.";
+  var TIP_UNKNOWN_OPENS = "VICARIUS found {n} with no recorded close, or carried over from the older job record, " +
+    "and counts no Metashape time for them.";
+  // What a row says when it names no editor: nobody certified the transect and
+  // no live open named a person (timelines.editor_of, never the creator).
+  var LINE_NO_EDITOR = "no editor on record";
 
   /* ---- pure helpers (exported to node) --------------------------------------- */
 
@@ -266,11 +270,11 @@
     return '<td class="vt-mono vt-num">' + (words ? esc(words) : '<span class="count">none</span>') + "</td>";
   }
 
-  // unknownOpensHtml(n): "+5 open" as a count chip, the full sentence in its tooltip.
+  // unknownOpensHtml(n): "+5 opens" as a count chip, the full sentence in its tooltip.
   function unknownOpensHtml(n) {
     if (!(n > 0)) return "";
     var tip = TIP_UNKNOWN_OPENS.replace("{n}", plural(n, "open"));
-    return '<span class="id code vt-tl-opens" tabindex="0" title="' + esc(tip) + '">+' + esc(n) + " open</span>";
+    return '<span class="id code vt-tl-opens" tabindex="0" title="' + esc(tip) + '">+' + esc(plural(n, "open")) + "</span>";
   }
 
   // totalCell(row): the total, with the upload's day and time under it once uploaded.
@@ -477,7 +481,8 @@
       var forKey = st.detailFor;
       el.drawerTitle.innerHTML = (row.site_name ? '<span class="vt-site">' + esc(row.site_name) + "</span> " : "") + chip(row.site) +
         " " + esc(row.transect) + " " + chip(row.psx);
-      el.drawerSub.textContent = "Project " + row.job_id + ", editor " + row.editor + ". Atlas rows " +
+      el.drawerSub.textContent = "Project " + row.job_id + ", " + (row.editor ? "editor " + row.editor : LINE_NO_EDITOR) +
+        ". Atlas rows " +
         (row.readable_ids || []).join(", ") + ".";
       el.drawerBody.innerHTML = '<p class="count">Reading the status history and notes.</p>';
       el.drawer.hidden = false;

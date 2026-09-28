@@ -209,9 +209,22 @@ def durations(intervals, since: datetime | None, until: datetime | None) -> dict
     return out
 
 
-def _editor(project: Mapping, job: Mapping) -> str:
-    """The transect's certifier, else the project's creator."""
-    return _text(_mapping(project.get("certification")).get("by")) or _text(job.get("created_by"))
+def editor_of(project: Mapping) -> str:
+    """Who a transect names as its editor: the certifier, else the last live opener, else "".
+
+    The same order as the manual edit review content (manualedit.transfers.
+    dossier_editor): an open the migration carried over (legacy) is skipped,
+    since the old watcher signed those with the job's creator, and so is an
+    open that names nobody. The project's creator is never named in place
+    of the editor; the review shows "" as no editor on record.
+    """
+    certifier = _text(_mapping(project.get("certification")).get("by"))
+    if certifier:
+        return certifier
+    for event in reversed(_open_events(project.get("opens"))):
+        if event.get("event") == OPEN_EVENT and not event.get("legacy") and _text(event.get("by")):
+            return _text(event.get("by"))
+    return ""
 
 
 def _open_events(opens) -> list:
@@ -314,7 +327,7 @@ def _row(job: Mapping, transect: Mapping, project: Mapping, figures: Mapping, me
     return {
         "job_id": job_id, "psx": transect["psx"], "processing_folder": transect["processing_folder"],
         "readable_ids": list(transect["readable_ids"]), "site": transect["site"], "site_name": transect["site_name"],
-        "transect": transect["transect"], "editor": _editor(project, job), "round": _count(project.get("round")),
+        "transect": transect["transect"], "editor": editor_of(project), "round": _count(project.get("round")),
         "state": state, "state_word": str(state_words.get(state, state)), "created_at": job.get("created_at"),
         "phase": job.get("phase"),
         **figures,

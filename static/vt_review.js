@@ -433,7 +433,16 @@
     return site + " " + String(it.transect || "");
   }
 
-  var helpers = { esc: esc, levelWord: levelWord, roundLabel: roundLabel, astText: astText, spanText: spanText,
+  // "edited by XY", or LINE_NO_EDITOR when the record names nobody; the queue
+  // rows and the review content read the same editor order (certifier, else
+  // the last live opener, never the project's creator).
+  function editedByText(editor) {
+    var who = typeof editor === "string" ? editor.trim() : "";
+    return who ? "edited by " + who : LINE_NO_EDITOR;
+  }
+
+  var helpers = { esc: esc, editedByText: editedByText,
+                  levelWord: levelWord, roundLabel: roundLabel, astText: astText, spanText: spanText,
                   resultLine: resultLine, readyToRecord: readyToRecord, projectUrl: projectUrl, limitsLine: limitsLine,
                   restartConfirmText: restartConfirmText, stateTimes: stateTimes, roundGroups: roundGroups,
                   queueMeta: queueMeta, transectWords: transectWords, resumeLine: resumeLine, resumeTexts: resumeTexts,
@@ -482,7 +491,7 @@
     var editor = editorOf(d);
     return '<p class="vt-review-facts"><span data-review-part="state">' + stateHtml(badge.role, badge.words) +
       "</span>" + (round ? '<span class="count">' + esc(round) + "</span>" : "") +
-      '<span class="count">' + esc(editor ? "edited by " + editor : LINE_NO_EDITOR) + "</span></p>";
+      '<span class="count">' + esc(editedByText(editor)) + "</span></p>";
   }
 
   // One definition-list row: the label with its "?" glyph, the control beside it.
@@ -1132,7 +1141,7 @@
       nameHtml(item) + '</span><span class="row-act">' + reviewButtonHtml("items", index) + "</span>" +
       '<span class="row-state">' + stateHtml(STATE_ROLES.review, roundLabel(item.round) || "admin review") +
       (checks ? '<span class="count">' + esc(checks) + "</span>" : "") + "</span>" +
-      projectMeta(item, ["edited by " + (item.editor || "-"), item.confirmed_at ? "confirmed " + astText(item.confirmed_at) : ""]) +
+      projectMeta(item, [editedByText(item.editor), item.confirmed_at ? "confirmed " + astText(item.confirmed_at) : ""]) +
       "</li>";
   }
 
@@ -1149,7 +1158,7 @@
     return '<li class="row" data-vt-review-key="' + esc(item.job_id + "/" + item.psx) + '"><span class="row-name">' +
       nameHtml(item) + '</span><span class="row-act">' + reviewButtonHtml("returnable", index) + "</span>" +
       '<span class="row-state">' + stateHtml(STATE_ROLES.upload, "Marked for upload") + "</span>" +
-      projectMeta(item, [roundLabel(item.round), "edited by " + (item.editor || "-")]) + "</li>";
+      projectMeta(item, [roundLabel(item.round), editedByText(item.editor)]) + "</li>";
   }
 
   function unmatchedHtml(id) {

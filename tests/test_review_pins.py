@@ -84,6 +84,15 @@ class Helpers(unittest.TestCase):
         for case in cases[1:11] + cases[12:]:
             self.assertTrue(case["line"].endswith(".") and not case["line"].startswith("You"), case)
 
+    def test_an_empty_editor_reads_no_editor_on_record_in_the_queue_and_the_content(self):
+        """V-claim-audit-3: a queue row with no editor says so, the same words as the review content under it."""
+        out = run_node("""return [h.editedByText("XY"), h.editedByText(""), h.editedByText("  "),
+                                  h.editedByText(null), h.editedByText(undefined)];""")
+        self.assertEqual(out, ["edited by XY"] + ["no editor on record"] * 4)
+        source = REVIEW_JS.read_text(encoding="utf-8")
+        self.assertNotIn('item.editor || "-"', source)
+        self.assertEqual(source.count("editedByText(item.editor)"), 2, "the In review and Marked for upload rows")
+
     def test_round_label_counts_rounds_from_one(self):
         out = run_node("""return [h.roundLabel(0), h.roundLabel(1), h.roundLabel("2"), h.roundLabel(-1),
                                   h.roundLabel(1.5), h.roundLabel(null), h.roundLabel(""), h.roundLabel("x")];""")
