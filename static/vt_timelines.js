@@ -44,7 +44,7 @@
   var FILTER_KEYS = ["job", "state", "editor", "since"];
   // The summary's phrase per transect state, admin review first (attention before the rest).
   var SUMMARY_PHRASES = [["review", "in admin review"], ["restarting", "starting over"], ["upload", "marked for re-upload"],
-                         ["uploading", "uploading"], ["editing", "editing"], ["todo", "not opened"], ["done", "uploaded"]];
+                         ["uploading", "uploading"], ["editing", "editing"], ["todo", "not started"], ["done", "uploaded"]];
   // The chip of each transect state: the atlas matrix colour of the registry status it writes (the shared
   // stage chips of static/vicarius_roles.css); static/vt_review.js uses the same map.
   var STATE_ROLES = { todo: "stage-bench", editing: "stage-bench", review: "stage-review", upload: "stage-upload",
