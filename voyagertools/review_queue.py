@@ -82,16 +82,11 @@ def _transect_base(job: Mapping, transect: Mapping, project: Mapping) -> dict:
             "round": _round(project.get("round"))}
 
 
-def _editor(job: Mapping, project: Mapping) -> str:
-    """Who certified the transect, else who started its project."""
-    return _text(_mapping(project.get("certification")).get("by")) or _text(job.get("created_by"))
-
-
 def _item(job: Mapping, transect: Mapping, project: Mapping) -> dict:
     """One In review row."""
     failed, warned = _check_counts(project)
     return dict(_transect_base(job, transect, project), state=_text(project.get("state")),
-                editor=_editor(job, project),
+                editor=timelines.editor_of(project),
                 confirmed_at=_text(_mapping(project.get("certification")).get("at")),
                 failed_checks=failed, warned_checks=warned)
 
@@ -173,7 +168,7 @@ def queue_items(rows: Iterable[Mapping], jobs: list, site_name_fn: Callable[[str
             if rules.stopped(project):
                 stopped.append(_stopped(job, transect, project))
             if rules.returnable(project):
-                returnable.append(dict(_transect_base(job, transect, project), editor=_editor(job, project)))
+                returnable.append(dict(_transect_base(job, transect, project), editor=timelines.editor_of(project)))
     items.sort(key=lambda item: (item["confirmed_at"] or NO_TIME, item["job_id"], item["psx"]))
     return {"items": items, "stopped_restarts": stopped, "marked_for_upload": returnable,
             "unmatched": sorted(in_review - held, key=sort_key)}

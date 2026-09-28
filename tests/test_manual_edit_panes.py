@@ -293,7 +293,7 @@ class TimelinesPane(PanesCase):
         check(results, 'progress', vt('tl-projects').textContent.indexOf('1 of 1 uploaded') !== -1);
         check(results, 'running', vt('tl-rows').textContent.indexOf('Copying, 25 percent') !== -1);
         var opensChip = vt('tl-rows').querySelector('.vt-tl-opens');
-        check(results, 'unknown_opens', opensChip && opensChip.textContent === '+2 open' && opensChip.title.indexOf('2 opens with no recorded close') !== -1, opensChip && opensChip.title);
+        check(results, 'unknown_opens', opensChip && opensChip.textContent === '+2 opens' && opensChip.title.indexOf('2 opens with no recorded close') !== -1, opensChip && opensChip.title);
         var groups = qa('[data-vt="tl-rows"] tr.vt-tl-group').map(function (g) { return g.textContent; });
         check(results, 'project_lines', groups.length === 2 && groups[0].indexOf('ME-20260926-100000-LO') === 0 && groups[0].indexOf('started by LO, editing') !== -1 && groups[1].indexOf('started by CC, complete') !== -1, JSON.stringify(groups));
         check(results, 'uploaded_under_total', vt('tl-rows').textContent.indexOf('2026-09-2212:00 AST') !== -1);

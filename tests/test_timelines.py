@@ -326,6 +326,18 @@ class ProjectRows(unittest.TestCase):
         self.assertEqual(t1["created_at"], iso(20, 9))
         self.assertEqual((t1["phase"], t2["phase"]), ("done", "editing"), "a cancelled project's rows can say so")
 
+    def test_the_editor_is_the_certifier_else_the_last_live_opener_never_the_creator(self):
+        """V-claim-audit-3: the timelines use the review content's order; a migrated open signs nothing."""
+        job = new_job()
+        job["projects"][PSX_T2].update(certification=None, opens=[
+            {"event": "open", "at": iso(25, 13), "by": "XY"}, {"event": "close", "at": iso(25, 14), "by": "XY"},
+            {"event": "open", "at": iso(25, 15), "by": "CC", "legacy": True}])
+        row = [r for r in build_rows([job]) if r["psx"] == PSX_T2][0]
+        self.assertEqual(row["editor"], "XY")
+        job["projects"][PSX_T2]["opens"] = [{"event": "open", "at": iso(25, 13), "by": ""}]
+        row = [r for r in build_rows([job]) if r["psx"] == PSX_T2][0]
+        self.assertEqual(row["editor"], "")
+
     def test_a_transect_edited_again_later_is_counted_once(self):
         later = dict(new_job(), job_id="ME-20260922-110000-LO", created_at=iso(22, 11),
                      rows=rows_for(T1_IDS, PSX_T1, "MRS", "T1"),
@@ -347,7 +359,7 @@ class ProjectRows(unittest.TestCase):
         self.assertIsNone(row["pulled_at"])
         self.assertIsNone(row["total_s"])
         self.assertEqual((row["editing_s"], row["metashape_s"], row["opens"]), (0, 0, 0))
-        self.assertEqual(row["editor"], "CC")
+        self.assertEqual(row["editor"], "", "never the project's creator (CC)")
         self.assertEqual(row["last_note"], "")
 
     def test_an_upload_set_that_cannot_be_read_says_so(self):
@@ -426,7 +438,7 @@ class ProjectRows(unittest.TestCase):
         row = build_rows([job])[0]
         self.assertEqual(row["round"], 0)
         self.assertEqual(row["opens"], 0)
-        self.assertEqual(row["editor"], "CC")
+        self.assertEqual(row["editor"], "", "an unreadable certification names nobody, never the creator")
         self.assertFalse(row["checks_open"])
         self.assertEqual(row["review_s"], 75600, "an unreadable created_at opens the window at the start")
 
