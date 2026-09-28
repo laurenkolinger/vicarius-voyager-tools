@@ -911,18 +911,21 @@
       });
     }
 
-    var CANCEL_TIP = "Cancel this project after the confirmation. VICARIUS marks it cancelled, returns each row still at editing to awaiting with its Shelf location, and removes the edit bench copies when the project never reached the push to the Shelf.";
+    var CANCEL_TIP = "Cancel this project after the confirmation. VICARIUS puts the rows not yet through Mark done back to awaiting and removes only the edit bench copies nobody opened or saved; a copy with edits stays for Remove from the edit bench.";
+
+    function onCancelHtml(job) {
+      if (job.refusal) return esc(job.refusal);
+      var removed = job.prune_targets.length ? "removes " + esc(job.prune_targets.join(", ")) : "removes no edit bench copy";
+      return removed + "." + (job.prune_kept.length ? " " + esc(job.prune_kept.join(" ")) : "");
+    }
 
     function projectHtml(job) {
-      var onCancel = job.refusal ? esc(job.refusal)
-        : (job.will_prune ? "the edit bench copies are removed: " + esc(job.prune_targets.join(", ") || "none on disk")
-                          : "the local copies are kept (the project reached the push to the Shelf)");
       return '<div class="vt-me-project" data-job-id="' + esc(job.job_id) + '" data-job-rows="' + job.rows.length + '">' +
         '<dl class="choices">' +
         '<div><dt>Project</dt><dd>' + esc(job.job_id) + " (" + esc(job.phase) + ")</dd></div>" +
         "<div><dt>Created</dt><dd>" + esc(stampWords(job.created_at)) + " by " + esc(job.created_by) + "</dd></div>" +
         '<div><dt>Edit bench</dt><dd><span class="id">' + esc(job.edit_bench) + "</span></dd></div>" +
-        "<div><dt>On cancel</dt><dd>" + onCancel + "</dd></div>" +
+        "<div><dt>On cancel</dt><dd>" + onCancelHtml(job) + "</dd></div>" +
         "</dl>" +
         '<ul class="rows" aria-label="The rows of project ' + esc(job.job_id) + '">' + job.rows.map(function (r) {
           return '<li class="row"><span class="row-name">' + idChip(r.readable_id) + '</span><span class="row-meta">' +
@@ -944,15 +947,11 @@
     }
 
     function cancelResultText(d) {
-      var reset = d.restored.filter(function (r) { return r.status_reset; }).length;
-      var kept = d.restored.filter(function (r) { return r.status_kept !== null; });
+      var reset = d.rows_reset.length;
       var text = "Project " + esc(d.job_id) + " is " + esc(d.phase) + ": " + reset + " row" + (reset === 1 ? "" : "s") + " back to awaiting, " +
         d.pruned.length + " local cop" + (d.pruned.length === 1 ? "y" : "ies") + " removed" + (d.kept.length ? ", " + d.kept.length + " kept" : "") + ".";
-      if (kept.length) {
-        text += " Status left as it was: " + kept.map(function (r) { return esc(r.readable_id) + " (" + esc(r.status_kept || "blank") + ")"; }).join(", ") + ".";
-      }
-      if (d.warnings.length) text += " " + esc(d.warnings.join(" "));
       if (d.problems.length) text += " " + esc(d.problems.join(" "));
+      if (d.warnings.length) text += " " + esc(d.warnings.join(" "));
       return text;
     }
 
@@ -968,13 +967,13 @@
       confirmDialog({
         title: "Cancel and prune the manual edit project",
         lines: ["Cancel project " + jobId + " with " + rows + " row" + (rows === "1" ? "" : "s") + ".",
-                "VICARIUS returns each row still at editing to awaiting with its Shelf location, leaves a row at done as it is, and removes the edit bench copies when the project never reached the push."],
+                "VICARIUS puts each row still at editing back to awaiting with its Shelf location and removes the edit bench copies nobody opened or saved after the pull; a copy with edits stays on the edit bench."],
         okLabel: "Cancel and prune"
       }).then(function (ok) {
         if (!ok) return;
         api("/api/manual-edit/cancel", { method: "POST", body: { job_id: jobId, initials: who, confirm: true } }).then(function (res) {
           if (!res.ok) { fail(meResult, res); return; }
-          setResult(meResult, cancelResultText(res.data), res.data.problems.length ? "warn" : "");
+          setResult(meResult, cancelResultText(res.data), res.data.problems.length || res.data.warnings.length ? "warn" : "");
           loadManual();
         });
       });

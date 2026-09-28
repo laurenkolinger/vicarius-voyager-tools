@@ -65,7 +65,7 @@ URL_PREFIX = "/voyager-tools"
 MODULE_SLUG = "voyager_tools"
 DISPLAY_NAME = "Atlas control panel"
 UI_STYLE = "voyager_tools"
-ASSET_VERSION = "20260927k"
+ASSET_VERSION = "20260927l"
 ROOT_SECTION_PREFIX = '<section class="voyager-tools"'
 STATIC_JS = "voyager_tools.js"
 STATIC_SETTINGS_JS = "vt_settings.js"  # the settings and desktop panes (program C spec 5.3)
@@ -127,6 +127,8 @@ ACTOR_PREFIX = "voyager_tools:"
 MAX_BODY_BYTES = 2 * 1024 * 1024
 MAX_PROMPTS_BYTES = 4 * 1024 * 1024
 LOG_TAIL = 20
+LINE_CANCEL_ELSEWHERE = ("Cancel manual edit projects from the Atlas control panel on the VICARIUS desktop, where the "
+                         "manual edit runs.")
 JOB_ID_KEY = "job_id"
 CONFIRM_KEY = "confirm"
 AST = timezone(timedelta(hours=-4))
@@ -242,6 +244,25 @@ def _recover_restarts_default(records: list[dict]) -> list[dict]:
                                        record.get(JOB_ID_KEY), exc)
             recovered.append(record)
     return recovered
+
+
+def _manual_edit_transfers():
+    """The manual edit module's transfers library (its one cancel, cancel_refusal and prune_plan)."""
+    _jobstore_module()
+    return importlib.import_module("manualedit.transfers")
+
+
+def _manual_edit_deps_default():
+    """The Deps kit of the manual edit module mounted in this app, or None when it is not mounted.
+
+    The one cancel judges the pull and the project legs from the leg
+    registries of the process they run in, so only an app that mounts the
+    manual edit blueprint (the desktop) can cancel; a standalone panel
+    refuses (LINE_CANCEL_ELSEWHERE) rather than judge from empty registries.
+    """
+    if MANUAL_EDIT_BLUEPRINT not in current_app.blueprints:
+        return None
+    return importlib.import_module("manualedit.views").get_deps()
 
 
 def _active_jobs_default() -> list[dict]:
@@ -405,7 +426,9 @@ class Deps:
     settings_stores.record_params_save; the default refuses);
     recover_uploads(store), the manual edit module's recovery of upload
     sets a desktop restart stranded; recover_restarts(records) -> records,
-    its recovery of start overs a desktop restart stranded.
+    its recovery of start overs a desktop restart stranded;
+    manual_edit_deps() -> the manual edit module's Deps kit in this app, or
+    None when it is not mounted (the one cancel reads its leg registries).
     """
 
     def __init__(self):
@@ -431,6 +454,7 @@ class Deps:
         self.record_setting: Callable[..., str] = _record_setting_refused
         self.recover_uploads: Callable = _recover_uploads_default
         self.recover_restarts: Callable[[list], list] = _recover_restarts_default
+        self.manual_edit_deps: Callable = _manual_edit_deps_default
 
 
 deps = Deps()
@@ -919,13 +943,23 @@ def _job_id(body: Mapping) -> str:
     return text
 
 
+def _cancel_refusal_of(job: Mapping, manual_deps) -> str:
+    """The one cancel's judgement of one project for the page, or LINE_CANCEL_ELSEWHERE without the manual edit module."""
+    if manual_deps is None:
+        return LINE_CANCEL_ELSEWHERE
+    return _manual_edit_transfers().cancel_refusal(manual_deps, job)
+
+
 @voyager_tools_bp.route("/api/manual-edit", methods=["GET"])
 @guarded
 def api_manual_edit():
-    """Every unfinished manual edit project, summarised: {"jobs": [summary, ...]}."""
+    """Every unfinished manual edit project, summarised with the one cancel's judgement: {"jobs": [summary, ...]}."""
     store = deps.job_store()
-    registry = deps.registry()
-    summaries = [clean_manual_edit.summarise(job, store.tail_log(job["job_id"], LOG_TAIL), registry_mod=registry)
+    manual_deps = deps.manual_edit_deps()
+    transfers = _manual_edit_transfers()
+    summaries = [clean_manual_edit.summarise(job, store.tail_log(job["job_id"], LOG_TAIL),
+                                             refusal=_cancel_refusal_of(job, manual_deps),
+                                             plan=transfers.prune_plan(job))
                  for job in _unfinished_jobs()]
     return jsonify({"jobs": summaries})
 
@@ -933,22 +967,33 @@ def api_manual_edit():
 @voyager_tools_bp.route("/api/manual-edit/cancel", methods=["POST"])
 @guarded
 def api_manual_edit_cancel():
-    """Cancel and prune one unfinished project: {job_id, initials, confirm: true}."""
+    """Cancel and prune one unfinished project through the manual edit module's one cancel: {job_id, initials, confirm: true}.
+
+    Answers {ok, job_id, phase, rows_reset, pruned, kept, problems, warnings}:
+    the folders removed from the edit bench (only through the bench removal,
+    and only when untouched), the folders left there, one sentence per kept
+    folder, and any warning. 409 with the one cancel's sentence when it
+    refuses, or when this app does not mount the manual edit module.
+    """
     body = _json_body()
     _confirmed(body)
     initials = _initials(body)
     job_id = _job_id(body)
     if job_id not in {job.get("job_id") for job in _unfinished_jobs()}:
         raise RequestError(f"{job_id} is not an unfinished manual edit project; refresh the list.", HTTP_CONFLICT)
-    store = deps.job_store()
-    host = str(deps.nas_config().get("host") or "").strip()
-    shelf_prefix = f"{host}:" if host else ""
+    manual_deps = deps.manual_edit_deps()
+    if manual_deps is None:
+        raise RequestError(LINE_CANCEL_ELSEWHERE, HTTP_CONFLICT)
+    transfers = _manual_edit_transfers()
     try:
-        result = clean_manual_edit.cancel_and_prune(store, deps.registry(), job_id, initials,
-                                                    rmtree_fn=deps.rmtree, shelf_prefix=shelf_prefix)
-    except clean_manual_edit.CancelRefused as exc:
+        answer = transfers.cancel_job(manual_deps, deps.job_store(), job_id, initials,
+                                      clean_manual_edit.CANCEL_REASON, prune=True)
+    except (transfers.TransferRefused, _jobstore_module().TransitionError) as exc:
         raise RequestError(str(exc), HTTP_CONFLICT)
-    return jsonify({"ok": True, **result})
+    return jsonify({"ok": True, "job_id": job_id, "phase": answer["job"]["phase"],
+                    "rows_reset": answer["rows_reset"], "pruned": answer["removed"],
+                    "kept": answer["kept_on_bench"], "problems": list(answer["kept_reasons"].values()),
+                    "warnings": answer["warnings"]})
 
 
 # --- tools 4 and 5: rewind and spot redo ------------------------------------------------------
