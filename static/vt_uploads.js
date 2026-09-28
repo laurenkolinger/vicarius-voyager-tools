@@ -82,7 +82,9 @@
         if (!t || typeof t !== "object" || typeof t.psx !== "string" || !t.psx || !keep(t)) return;
         out.push({ job_id: c.job_id, editor: c.created_by || "", psx: t.psx, processing_folder: t.processing_folder || "",
                    site: t.site || "", site_name: t.site_name || "", transect: t.transect || "",
-                   round: typeof t.round === "number" ? t.round : 0, state: t.state, upload_id: t.upload_id || "" });
+                   round: typeof t.round === "number" ? t.round : 0, state: t.state, upload_id: t.upload_id || "",
+                   shelf_mode: t.shelf_mode === "archive" || t.shelf_mode === "overwrite" ? t.shelf_mode : "",
+                   pre_edit_archive: t.pre_edit_archive || "" });
       });
     });
     return out;
@@ -123,16 +125,41 @@
     return site + " " + item.transect;
   }
 
+  // baseName(path): the last part of a Shelf path.
+  function baseName(path) { return String(path).replace(/\/+$/, "").split("/").pop(); }
+
+  // pinnedLine(item): the line of a transect whose first upload attempt already
+  // changed the Shelf, which keeps that attempt's mode whatever the setting says;
+  // "" for a transect with no such attempt.
+  function pinnedLine(item) {
+    var folder = item.processing_folder;
+    if (item.shelf_mode === "archive") {
+      var archive = item.pre_edit_archive ? baseName(item.pre_edit_archive) : folder + ARCHIVE_SUFFIX;
+      return "its first upload attempt kept the Voyager 1 copy as " + archive + ", so the edit goes up as " +
+        folder + " in archive mode.";
+    }
+    if (item.shelf_mode === "overwrite") {
+      return "its first upload attempt began to overwrite the Shelf folder " + folder +
+        ", so the edit replaces it in overwrite mode and files the edit removed are deleted there.";
+    }
+    return "";
+  }
+
   // uploadPlanLines(items, archive): the confirmation's lines; archive is the
-  // Shelf copy setting (true archive, false overwrite, null when unread).
+  // Shelf copy setting (true archive, false overwrite, null when unread), which
+  // a transect pinned by its first upload attempt does not follow.
   function uploadPlanLines(items, archive) {
     var lines = ["Upload " + plural(items.length, "transect") + " to the Shelf, one after another:"];
     items.forEach(function (item) {
       var head = transectWords(item) + " (" + item.psx + "): ";
       var folder = item.processing_folder;
-      if (archive === true) {
+      var pinned = pinnedLine(item);
+      if (pinned) {
+        lines.push(head + pinned);
+      } else if (archive === true) {
         lines.push(head + "the Shelf folder " + folder + " is renamed to " + folder + ARCHIVE_SUFFIX +
-                   " and kept, then the edit goes up as " + folder + ".");
+                   " (or a name with the edit round when an earlier archive holds that one) and kept, then the " +
+                   "edit goes up as " + folder + ".");
       } else if (archive === false) {
         lines.push(head + "the edit replaces the Shelf folder " + folder + ", and files the edit removed are deleted there.");
       } else {

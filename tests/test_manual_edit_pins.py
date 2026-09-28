@@ -111,13 +111,36 @@ class UploadsHelpers(unittest.TestCase):
         archive, overwrite, unknown = out
         self.assertEqual(archive[0], "Upload 2 transects to the Shelf, one after another:")
         self.assertEqual(archive[1], "MRS T2 (MRS_T2_2023_2024.psx): the Shelf folder MRS_T2_3D is renamed to "
-                                     "MRS_T2_3D_voy1_archive and kept, then the edit goes up as MRS_T2_3D.")
+                                     "MRS_T2_3D_voy1_archive (or a name with the edit round when an earlier archive "
+                                     "holds that one) and kept, then the edit goes up as MRS_T2_3D.")
         self.assertIn("Lang Bank Red Hind FSA (LBH) T3 (LBH_T3_2024_2025.psx)", archive[2])
         self.assertEqual(overwrite[0], "Upload 1 transect to the Shelf, one after another:")
         self.assertEqual(overwrite[1], "MRS T2 (MRS_T2_2023_2024.psx): the edit replaces the Shelf folder MRS_T2_3D, "
                                        "and files the edit removed are deleted there.")
         self.assertEqual(unknown[1], "MRS T2 (MRS_T2_2023_2024.psx): the Shelf copy is archived or overwritten as "
                                      "the Shelf copy setting says when the upload starts.")
+
+    def test_a_transect_pinned_by_its_first_attempt_ignores_the_setting(self):
+        """Red team finding F05: a retry keeps the mode of the attempt that first changed the Shelf."""
+        cards = [{"job_id": "ME-20260927-100000-LO", "created_by": "LO", "transects": [
+            {"psx": "MRS_T2_2023_2024.psx", "processing_folder": "MRS_T2_3D", "site": "MRS", "transect": "T2",
+             "state": "upload", "shelf_mode": "archive",
+             "pre_edit_archive": "/volume6/x/MRS_T2_3D_voy1_archive_r2_20260927-203000"},
+            {"psx": "MRS_T3_2023_2024.psx", "processing_folder": "MRS_T3_3D", "site": "MRS", "transect": "T3",
+             "state": "upload", "shelf_mode": "overwrite"},
+            {"psx": "MRS_T4_2023_2024.psx", "processing_folder": "MRS_T4_3D", "site": "MRS", "transect": "T4",
+             "state": "upload", "shelf_mode": "sideways"}]}]
+        out = run_node(UPLOADS_JS, "var i = h.readyItems(" + json.dumps(cards) + ");"
+                       "return [h.uploadPlanLines(i, false), h.uploadPlanLines(i, true)];")
+        overwrite_setting, archive_setting = out
+        self.assertEqual(overwrite_setting[1], "MRS T2 (MRS_T2_2023_2024.psx): its first upload attempt kept the "
+                                               "Voyager 1 copy as MRS_T2_3D_voy1_archive_r2_20260927-203000, so the "
+                                               "edit goes up as MRS_T2_3D in archive mode.")
+        self.assertEqual(archive_setting[2], "MRS T3 (MRS_T3_2023_2024.psx): its first upload attempt began to "
+                                             "overwrite the Shelf folder MRS_T3_3D, so the edit replaces it in "
+                                             "overwrite mode and files the edit removed are deleted there.")
+        self.assertIn("is renamed to MRS_T4_3D_voy1_archive", archive_setting[3], "an unknown mode is no pin")
+        self.assertEqual(overwrite_setting[1:3], archive_setting[1:3])
 
     def test_status_roles(self):
         out = run_node(UPLOADS_JS, "return ['queued','running','done','failed','stopped','interrupted','odd']"
