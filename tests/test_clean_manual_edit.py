@@ -227,7 +227,8 @@ class CancelAndPruneTests(unittest.TestCase):
 
     def test_a_metashape_holding_the_transect_is_refused(self):
         self.pulled()
-        with mock.patch.object(transfers.sessions, "psx_held", return_value=True):
+        holder = {"pid": 4242, "headless": False, "certain": True, "how": "command line"}
+        with mock.patch.object(transfers.sessions, "holder", return_value=holder):
             self.assert_refused(f"Metashape holds {PSX}")
 
     def test_every_marked_transect_state_is_refused(self):
