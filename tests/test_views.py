@@ -445,6 +445,19 @@ class WorkbenchRoutes(ToolsCase):
 
 
 class ManualEditRoutes(ToolsCase):
+    """Tool 3 over HTTP: the summary and Cancel and prune, through the manual edit module's one cancel."""
+
+    def setUp(self):
+        """Point the panel at a manual edit Deps kit of its own, as the desktop that mounts both would."""
+        super().setUp()
+        from manualedit import transfers, watcher
+        self.transfers = transfers
+        self.me_deps = transfers.Deps(
+            ssh_factory=None, transfer_fn=None, remote_spec_fn=None, archive_fn=None, launch_fn=None,
+            run_async=None, watchers=watcher.WatcherRegistry(poll_s=60), site_names_fn=dict, snapshot_fn=None,
+            metashape_executable_fn=None, legs=transfers.LegRegistry(), project_legs=transfers.ProjectLegRegistry())
+        views.deps.manual_edit_deps = lambda: self.me_deps
+
     def make_job(self):
         local = self.bench / FOLDER
         job = self.jobs.create_job(
@@ -452,7 +465,7 @@ class ManualEditRoutes(ToolsCase):
               "shelf_location": f"{SHELF_PARENT}/{FOLDER}", "psx_basename": "MRS_T1_2023_2023.psx"}],
             str(self.bench), "LO")
         local.mkdir()
-        (local / "x.psx").write_bytes(b"p")
+        (local / "MRS_T1_2023_2023.psx").write_bytes(b"p")
         seed_status(self.registry, RID_DONE, "editing", processing_location=str(local))
         return job, local
 
@@ -466,10 +479,11 @@ class ManualEditRoutes(ToolsCase):
         own active_jobs() lists both."""
         folder = "LBH_T2_3D"
         (self.bench / folder).mkdir()
-        record = dict(first, job_id="ME-20260927-020000-CC", created_by="CC", projects={},
-                      rows=[{"readable_id": RID_LBH, "site": "LBH", "transect": "T2", "processing_folder": folder,
-                             "shelf_location": f"{SHELF_PARENT}/{folder}", "local_path": str(self.bench / folder),
-                             "psx_basename": "LBH_T2_2025_2025.psx"}])
+        rows = [{"readable_id": RID_LBH, "site": "LBH", "transect": "T2", "processing_folder": folder,
+                 "shelf_location": f"{SHELF_PARENT}/{folder}", "local_path": str(self.bench / folder),
+                 "psx_basename": "LBH_T2_2025_2025.psx"}]
+        record = dict(first, job_id="ME-20260927-020000-CC", created_by="CC", projects=jobstore.build_projects(rows),
+                      rows=rows)
         self.jobs.save_job(record)
         seed_status(self.registry, RID_LBH, "editing")
         views.deps.job_store = lambda: self.jobs
@@ -499,13 +513,17 @@ class ManualEditRoutes(ToolsCase):
         self.unlock()
         job, local = self.make_job()
         self.jobs.transition(job["job_id"], "pulling", "LO")
+        self.transfers.legs_of(self.me_deps).begin(job["job_id"])
         r = self.client.get("/voyager-tools/api/manual-edit")
         summary = r.get_json()["jobs"][0]
         self.assertEqual(summary["phase"], "pulling")
         self.assertFalse(summary["can_cancel"])
+        self.assertIn("still copying", summary["refusal"])
         r = self.cancel(job_id=job["job_id"])
         self.assertEqual(r.status_code, 409)
-        self.jobs.transition(job["job_id"], "editing", "LO")
+        self.assertTrue(local.exists())
+        self.transfers.legs_of(self.me_deps).end(job["job_id"])
+        self.jobs.transition(job["job_id"], "editing", "LO", self.transfers.PULL_VERIFIED_REASON)
         self.jobs.append_log(job["job_id"], "pulled")
         summary = self.client.get("/voyager-tools/api/manual-edit").get_json()["jobs"][0]
         self.assertTrue(summary["can_cancel"])
@@ -513,13 +531,16 @@ class ManualEditRoutes(ToolsCase):
         self.assertTrue(summary["log_tail"][0].endswith("pulled"))
         r = self.client.post("/voyager-tools/api/manual-edit/cancel", json={"initials": "LO", "job_id": job["job_id"]})
         self.assertEqual(r.status_code, 400)
+        self.assertEqual(summary["prune_targets"], [FOLDER])
         r = self.cancel(job_id=f"  {job['job_id']} ")
         self.assertEqual(r.status_code, 200, r.get_json())
         self.assertEqual(r.get_json()["phase"], "cancelled")
-        self.assertIsNone(r.get_json()["restored"][0]["status_kept"])
+        self.assertEqual((r.get_json()["rows_reset"], r.get_json()["pruned"]), ([RID_DONE], [FOLDER]))
+        self.assertEqual(r.get_json()["walkthrough_url"], f"/popout/manual-edit?job={job['job_id']}")
         self.assertFalse(local.exists())
         self.assertEqual(self.registry.get(RID_DONE)["manual_edit_status"], "awaiting")
-        self.assertEqual(self.registry.get(RID_DONE)["processing_location"], f"{SHELF_PARENT}/{FOLDER}")
+        self.assertEqual(self.registry.get(RID_DONE)["processing_location"],
+                         self.transfers.SHELF_PREFIX + f"{SHELF_PARENT}/{FOLDER}")
         self.assertIsNone(self.jobs.current())
         self.assertEqual(self.client.get("/voyager-tools/api/manual-edit").get_json()["jobs"], [])
         r = self.cancel(job_id=job["job_id"])
@@ -537,10 +558,36 @@ class ManualEditRoutes(ToolsCase):
         self.registry._write_rows(rows)
         summary = self.client.get("/voyager-tools/api/manual-edit").get_json()["jobs"][0]
         self.assertFalse(summary["can_cancel"])
-        self.assertIn("certified edit", summary["refusal"])
+        self.assertIn("is marked for admin review in the atlas", summary["refusal"])
         r = self.cancel(job_id=job["job_id"])
         self.assertEqual(r.status_code, 409)
         self.assertTrue(local.exists())
+
+    def test_a_panel_without_the_manual_edit_module_refuses_the_cancel(self):
+        """A standalone panel has no leg registries to judge from, so it lists the refusal and answers 409."""
+        self.unlock()
+        job, local = self.make_job()
+        self.jobs.transition(job["job_id"], "pulling", "LO")
+        self.jobs.transition(job["job_id"], "editing", "LO", self.transfers.PULL_VERIFIED_REASON)
+        views.deps.manual_edit_deps = lambda: None
+        summary = self.client.get("/voyager-tools/api/manual-edit").get_json()["jobs"][0]
+        self.assertEqual((summary["refusal"], summary["can_cancel"]), (views.LINE_CANCEL_ELSEWHERE, False))
+        r = self.cancel(job_id=job["job_id"])
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(r.get_json()["error"], views.LINE_CANCEL_ELSEWHERE)
+        self.assertTrue(local.exists())
+        self.assertEqual(self.jobs.load_job(job["job_id"])["phase"], "editing")
+
+    def test_the_list_recovers_a_checks_run_a_restart_stranded_before_judging(self):
+        """The cancel recovers first, so the list does too: a run stranded in reading must not keep Cancel off."""
+        self.unlock()
+        job, _local = self.make_job()
+        self.jobs.transition(job["job_id"], "pulling", "LO")
+        self.jobs.transition(job["job_id"], "editing", "LO", self.transfers.PULL_VERIFIED_REASON)
+        self.jobs.init_projects(job["job_id"])
+        self.jobs.begin_checks_run(job["job_id"], "MRS_T1_2023_2023.psx", by="LO")
+        summary = self.client.get("/voyager-tools/api/manual-edit").get_json()["jobs"][0]
+        self.assertTrue(summary["can_cancel"], summary["refusal"])
 
     def test_every_unfinished_project_is_listed_and_cancelled_on_its_own(self):
         self.unlock()
@@ -555,7 +602,7 @@ class ManualEditRoutes(ToolsCase):
         r = self.cancel(job_id=second["job_id"])
         self.assertEqual(r.status_code, 200, r.get_json())
         self.assertEqual(self.registry.get(RID_LBH)["manual_edit_status"], "awaiting")
-        self.assertEqual(r.get_json()["pruned"], [os.path.realpath(self.bench / "LBH_T2_3D")])
+        self.assertEqual(r.get_json()["pruned"], ["LBH_T2_3D"])
         self.assertEqual(self.registry.get(RID_DONE)["manual_edit_status"], "editing")
         self.assertTrue(local.exists())
         left = self.client.get("/voyager-tools/api/manual-edit").get_json()["jobs"]

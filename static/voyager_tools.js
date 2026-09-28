@@ -381,7 +381,7 @@
           (spec.lines || []).map(function (l) { return "<p>" + esc(l) + "</p>"; }).join("") +
           fieldHtml +
           '<div class="actions">' +
-          '<button type="button" class="btn" data-vt-dialog="cancel">Cancel</button>' +
+          '<button type="button" class="btn" data-vt-dialog="cancel">' + esc(spec.cancelLabel || "Cancel") + "</button>" +
           '<button type="button" class="btn ' + (spec.primary ? "btn-primary" : "btn-danger") + '" data-vt-dialog="ok">' + esc(spec.okLabel || "Confirm") + "</button>" +
           "</div></div>";
         root.appendChild(backdrop);
@@ -911,18 +911,34 @@
       });
     }
 
-    var CANCEL_TIP = "Cancel this project after the confirmation. VICARIUS marks it cancelled, returns each row still at editing to awaiting with its Shelf location, and removes the edit bench copies when the project never reached the push to the Shelf.";
+    var CANCEL_TIP = "Cancel this project after the confirmation. VICARIUS puts the rows not yet through Mark done back to awaiting and removes only the edit bench copies nobody opened or saved; an admin removes a kept copy in the project's walkthrough.";
+    // Said once after the kept folders, wherever the panel lists them.
+    var LINE_KEPT_REMOVAL = "An admin removes a kept folder with Remove from the edit bench in the cancelled project's walkthrough once its edits are not needed.";
+    var jobsById = {};
+
+    // removesLine: which edit bench copies Cancel and prune removes, as one sentence.
+    function removesLine(job) {
+      return job.prune_targets.length ? "Removes " + job.prune_targets.join(", ") + "." : "Removes no edit bench copy.";
+    }
+
+    // onCancelHtml: the On cancel value: the refusal in warning ink, or what
+    // goes, one line per folder that stays, and the removal said once.
+    function onCancelHtml(job) {
+      if (job.refusal) return '<span class="vt-me-refusal">' + esc(job.refusal) + "</span>";
+      var lines = [removesLine(job)].concat(job.prune_kept);
+      if (job.prune_kept.length) lines.push(LINE_KEPT_REMOVAL);
+      return '<div class="vt-me-lines">' + lines.map(function (line) {
+        return '<span class="vt-me-line">' + esc(line) + "</span>";
+      }).join("") + "</div>";
+    }
 
     function projectHtml(job) {
-      var onCancel = job.refusal ? esc(job.refusal)
-        : (job.will_prune ? "the edit bench copies are removed: " + esc(job.prune_targets.join(", ") || "none on disk")
-                          : "the local copies are kept (the project reached the push to the Shelf)");
       return '<div class="vt-me-project" data-job-id="' + esc(job.job_id) + '" data-job-rows="' + job.rows.length + '">' +
         '<dl class="choices">' +
         '<div><dt>Project</dt><dd>' + esc(job.job_id) + " (" + esc(job.phase) + ")</dd></div>" +
         "<div><dt>Created</dt><dd>" + esc(stampWords(job.created_at)) + " by " + esc(job.created_by) + "</dd></div>" +
         '<div><dt>Edit bench</dt><dd><span class="id">' + esc(job.edit_bench) + "</span></dd></div>" +
-        "<div><dt>On cancel</dt><dd>" + onCancel + "</dd></div>" +
+        "<div><dt>On cancel</dt><dd>" + onCancelHtml(job) + "</dd></div>" +
         "</dl>" +
         '<ul class="rows" aria-label="The rows of project ' + esc(job.job_id) + '">' + job.rows.map(function (r) {
           return '<li class="row"><span class="row-name">' + idChip(r.readable_id) + '</span><span class="row-meta">' +
@@ -938,21 +954,25 @@
     }
 
     function renderManual(jobs) {
+      jobsById = {};
+      jobs.forEach(function (job) { jobsById[job.job_id] = job; });
       var host = q(root, "me-summary");
       host.innerHTML = jobs.length ? jobs.map(projectHtml).join("")
         : '<p class="count">No manual edit project is unfinished.</p>';
     }
 
+    // cancelResultText: what the cancel did, why each kept folder stays, and
+    // the walkthrough where an admin removes a kept folder.
     function cancelResultText(d) {
-      var reset = d.restored.filter(function (r) { return r.status_reset; }).length;
-      var kept = d.restored.filter(function (r) { return r.status_kept !== null; });
+      var reset = d.rows_reset.length;
       var text = "Project " + esc(d.job_id) + " is " + esc(d.phase) + ": " + reset + " row" + (reset === 1 ? "" : "s") + " back to awaiting, " +
-        d.pruned.length + " local cop" + (d.pruned.length === 1 ? "y" : "ies") + " removed" + (d.kept.length ? ", " + d.kept.length + " kept" : "") + ".";
-      if (kept.length) {
-        text += " Status left as it was: " + kept.map(function (r) { return esc(r.readable_id) + " (" + esc(r.status_kept || "blank") + ")"; }).join(", ") + ".";
-      }
-      if (d.warnings.length) text += " " + esc(d.warnings.join(" "));
+        d.pruned.length + " edit bench cop" + (d.pruned.length === 1 ? "y" : "ies") + " removed" + (d.kept.length ? ", " + d.kept.length + " kept" : "") + ".";
       if (d.problems.length) text += " " + esc(d.problems.join(" "));
+      if (d.warnings.length) text += " " + esc(d.warnings.join(" "));
+      if (d.kept.length && d.walkthrough_url) {
+        text += " " + esc(LINE_KEPT_REMOVAL) + ' <a class="vt-link" href="' + esc(d.walkthrough_url) + '" target="' +
+          esc(("manual-edit-walkthrough-" + d.job_id).replace(/[^A-Za-z0-9_-]/g, "-")) + '" rel="noopener">Open the walkthrough of ' + esc(d.job_id) + "</a>";
+      }
       return text;
     }
 
@@ -965,16 +985,19 @@
       var block = btn.closest(".vt-me-project");
       var jobId = block.getAttribute("data-job-id") || "";
       var rows = block.getAttribute("data-job-rows") || "0";
+      var job = jobsById[jobId] || { prune_targets: [], prune_kept: [] };
       confirmDialog({
         title: "Cancel and prune the manual edit project",
         lines: ["Cancel project " + jobId + " with " + rows + " row" + (rows === "1" ? "" : "s") + ".",
-                "VICARIUS returns each row still at editing to awaiting with its Shelf location, leaves a row at done as it is, and removes the edit bench copies when the project never reached the push."],
-        okLabel: "Cancel and prune"
+                "VICARIUS puts each row still at editing back to awaiting with its Shelf location. " + removesLine(job)]
+          .concat(job.prune_kept),
+        okLabel: "Cancel and prune",
+        cancelLabel: "Keep the project"
       }).then(function (ok) {
         if (!ok) return;
         api("/api/manual-edit/cancel", { method: "POST", body: { job_id: jobId, initials: who, confirm: true } }).then(function (res) {
           if (!res.ok) { fail(meResult, res); return; }
-          setResult(meResult, cancelResultText(res.data), res.data.problems.length ? "warn" : "");
+          setResult(meResult, cancelResultText(res.data), res.data.problems.length || res.data.warnings.length ? "warn" : "");
           loadManual();
         });
       });

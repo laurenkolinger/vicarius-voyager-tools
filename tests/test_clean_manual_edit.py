@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """
 Module: tests/test_clean_manual_edit.py
-Purpose: Unit, adversarial and integration tests for
-         voyagertools.clean_manual_edit against a real manualedit.jobstore
-         and a temporary registry root.
+Purpose: Unit, adversarial and integration tests for tool 3, Clean manual
+         edit run: voyagertools.clean_manual_edit.summarise, and the Cancel
+         and prune it offers, which is the manual edit module's one cancel
+         (manualedit.transfers.cancel_job with prune=True, hardening F14)
+         run against a real manualedit.jobstore and a temporary registry
+         root: every refusal a live pull, leg, Metashape, marked transect,
+         atlas value or Mark done note brings, and a bench folder removed
+         only when nobody opened or saved it, only through the bench removal.
 Inputs:  one temporary registry root per test (VICARIUS_3D_REGISTRY_ROOT plus
-         importlib.reload), a JobStore on the same root, an edit bench folder.
+         importlib.reload), a JobStore on the same root, an edit bench folder,
+         a manual edit Deps kit with its own leg registries.
 Outputs: unittest results; every temporary directory is removed in tearDown.
 
 Run from the clone root:
@@ -18,8 +24,10 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -30,139 +38,91 @@ for path in (REGISTRY_LIB_DIR, MANUAL_EDIT_CLONE):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from manualedit import jobstore  # noqa: E402
+from manualedit import jobstore, transfers, watcher  # noqa: E402
 from voyagertools import clean_manual_edit as cme  # noqa: E402
 
 sys.path.insert(0, str(HERE))
 from status_seed import seed_status  # noqa: E402
 
-HOST = "146.226.147.140"
 SHELF_PARENT = "/volume6/Archive8_12TB/driver_deposits/run1"
 RID = "MRS_T1_2023ann"
 FOLDER = "MRS_T1_3D"  # the one processing folder of MRS T1, named for site and transect alone
-# When a phase an older job file carries was entered (a fixed AST time).
-LEGACY_PHASE_AT = "2026-09-20T10:00:00-04:00"
+PSX = "MRS_T1_2023_2023.psx"
+JOB = {"job_id": "ME-20260927-010000-LO", "phase": "editing", "created_by": "LO",
+       "created_at": "2026-09-27T01:00:00-04:00", "edit_bench": "/bench",
+       "rows": [{"readable_id": RID, "site": "MRS", "site_name": "Meri Shoal", "transect": "T1",
+                 "local_path": "/bench/MRS_T1_3D", "shelf_location": f"{SHELF_PARENT}/{FOLDER}"}],
+       "phase_history": [{"phase": "draft", "at": "a", "by": "LO", "reason": ""}]}
 
 
-class Pure(unittest.TestCase):
-    def test_has_host_prefix(self):
-        self.assertFalse(cme._has_host_prefix("/volume6/Archive8_12TB/x"))
-        self.assertTrue(cme._has_host_prefix(f"{HOST}:/volume6/Archive8_12TB/x"))
-        self.assertFalse(cme._has_host_prefix(""))
+class SummaryTests(unittest.TestCase):
+    """summarise: what the page lists for one project, from the one cancel's judgement and plan."""
 
-    def test_constants_match_the_manual_edit_clone(self):
-        self.assertEqual(cme.PHASE_PULLING, jobstore.PULLING)
-        self.assertEqual(cme.PHASE_PUSHING, jobstore.PUSHING)
-        self.assertEqual(cme.PHASE_VERIFYING, jobstore.VERIFYING)
-        self.assertEqual(cme.PHASE_CANCELLED, jobstore.CANCELLED)
-        self.assertEqual(cme.FAILED_PREFIX, jobstore.FAILED_PREFIX)
+    def test_the_shape(self):
+        summary = cme.summarise(JOB, ["one", "two"], refusal="", plan=[])
+        self.assertEqual(set(summary), {"job_id", "phase", "created_by", "created_at", "edit_bench", "rows",
+                                        "history", "log_tail", "prune_targets", "prune_kept", "refusal",
+                                        "can_cancel"})
+        self.assertEqual(summary["rows"][0]["site_name"], "Meri Shoal")
+        self.assertEqual(summary["log_tail"], ["one", "two"])
+        self.assertTrue(summary["can_cancel"])
 
-    def test_initials_rule_is_the_registry_rule(self):
-        import registry
-        self.assertEqual(cme.INITIALS_PATTERN.pattern, registry.MANUAL_EDIT_INITIALS_PATTERN.pattern)
+    def test_the_plan_splits_into_folders_removed_and_sentences_kept(self):
+        plan = [{"folder": FOLDER, "local_path": "/bench/MRS_T1_3D", "keep": ""},
+                {"folder": "MRS_T2_3D", "local_path": "/bench/MRS_T2_3D", "keep": "MRS_T2_3D stays: it was saved."}]
+        summary = cme.summarise(JOB, [], plan=plan)
+        self.assertEqual(summary["prune_targets"], [FOLDER])
+        self.assertEqual(summary["prune_kept"], ["MRS_T2_3D stays: it was saved."])
 
-    def test_certified_project_states_match_the_manual_edit_clone(self):
-        # Program B adds these transect states in B0c to B3; each one the job
-        # store already defines must carry the word this module mirrors.
-        for name, word in (("PROJECT_REVIEW", "review"), ("PROJECT_UPLOAD", "upload"),
-                           ("PROJECT_UPLOADING", "uploading"), ("PROJECT_RESTARTING", "restarting")):
-            with self.subTest(name=name):
-                self.assertIn(word, cme.CERTIFIED_PROJECT_STATES)
-                if hasattr(jobstore, name):
-                    self.assertEqual(getattr(jobstore, name), word)
-        self.assertEqual(len(cme.CERTIFIED_PROJECT_STATES), 4)
+    def test_a_refusal_closes_the_cancel(self):
+        summary = cme.summarise(JOB, [], refusal="The pull is still copying.")
+        self.assertEqual((summary["refusal"], summary["can_cancel"]), ("The pull is still copying.", False))
 
-    def test_reset_name_is_one_the_registry_knows(self):
-        import registry
-        self.assertIn(cme.CLEAN_MANUAL_EDIT_RESET, registry.MANUAL_EDIT_RESETS)
-        sources, targets = registry.MANUAL_EDIT_RESETS[cme.CLEAN_MANUAL_EDIT_RESET]
-        self.assertEqual((sources, targets), ((registry.ME_EDITING,), (registry.ME_AWAITING,)))
+    def test_no_plan_is_nothing_to_remove(self):
+        summary = cme.summarise(JOB)
+        self.assertEqual((summary["prune_targets"], summary["prune_kept"], summary["log_tail"]), ([], [], []))
 
-    def test_no_status_literal_is_mirrored(self):
-        # The status words come from the registry library, never from a copy here.
-        for relic in ("STATUS_COLUMN", "DONE_COLUMN", "STATUS_AWAITING", "LOCATION_COLUMN"):
+    def test_the_history_keeps_its_tail(self):
+        job = dict(JOB, phase_history=[{"phase": "editing", "at": str(i), "by": "LO", "reason": ""}
+                                       for i in range(cme.HISTORY_TAIL + 5)] + ["junk"])
+        history = cme.summarise(job)["history"]
+        self.assertEqual(len(history), cme.HISTORY_TAIL)
+        self.assertEqual(history[-1]["at"], str(cme.HISTORY_TAIL + 4))
+
+    def test_rows_read_as_text_and_junk_rows_are_skipped(self):
+        job = dict(JOB, rows=[{"readable_id": RID, "site": None, "transect": 7}, "junk"])
+        rows = cme.summarise(job)["rows"]
+        self.assertEqual(rows, [{"readable_id": RID, "site": "", "site_name": "", "transect": "7", "local_path": "",
+                                 "shelf_location": ""}])
+
+    def test_a_record_that_is_not_a_job_is_refused(self):
+        for bad in (None, [], {"phase": "editing"}, {"job_id": 1, "phase": "editing"}, {"job_id": "j"}):
+            with self.subTest(job=bad), self.assertRaises(TypeError):
+                cme.summarise(bad)
+
+    def test_a_refusal_that_is_not_text_is_refused(self):
+        for bad in (None, 7, ["x"]):
+            with self.subTest(refusal=bad), self.assertRaises(TypeError):
+                cme.summarise(JOB, refusal=bad)
+
+    def test_a_plan_that_is_not_a_list_of_entries_is_refused(self):
+        for bad in ("x", {"folder": FOLDER}, ["x"], [None]):
+            with self.subTest(plan=bad), self.assertRaises(TypeError):
+                cme.summarise(JOB, plan=bad)
+
+    def test_the_old_cancel_is_gone(self):
+        for relic in ("cancel_and_prune", "restore_registry", "cancel_refusal", "registry_refusal", "reached_pushing",
+                      "prune_targets", "CancelRefused", "CLEAN_MANUAL_EDIT_RESET", "IN_FLIGHT_PHASES",
+                      "PUSH_PHASES", "PROCESSING_FOLDER_NAME", "actor"):
             self.assertFalse(hasattr(cme, relic), relic)
 
-    def test_actor(self):
-        self.assertEqual(cme.actor("lo"), "voyager_tools:LO")
-        self.assertEqual(cme.actor(" abcd "), "voyager_tools:ABCD")
-        # Two to four letters, the registry's MANUAL_EDIT_INITIALS_PATTERN (program C milestone C3).
-        for bad in ("", "L O", "LO;x", "a" * 9, "L", "L0", "ABCDE", "12"):
-            with self.assertRaises(ValueError):
-                cme.actor(bad)
-        with self.assertRaises(TypeError):
-            cme.actor(None)
-
-    def test_reached_pushing(self):
-        self.assertFalse(cme.reached_pushing({"job_id": "j", "phase": "editing", "phase_history": []}))
-        self.assertTrue(cme.reached_pushing({"job_id": "j", "phase": "failed_pushing"}))
-        self.assertTrue(cme.reached_pushing({"job_id": "j", "phase": "editing",
-                                             "phase_history": [{"phase": "pushing"}]}))
-        self.assertFalse(cme.reached_pushing({"job_id": "j", "phase": "editing", "phase_history": "junk"}))
-        with self.assertRaises(TypeError):
-            cme.reached_pushing({"phase": "editing"})
-
-    def test_refusals(self):
-        self.assertIn("already done", cme.cancel_refusal({"job_id": "j", "phase": "done"}))
-        self.assertIn("pushing right now", cme.cancel_refusal({"job_id": "j", "phase": "pushing"}))
-        self.assertIn("pulling right now", cme.cancel_refusal({"job_id": "j", "phase": "pulling"}))
-        self.assertEqual(cme.cancel_refusal({"job_id": "j", "phase": "editing"}), "")
-        self.assertEqual(cme.cancel_refusal({"job_id": "j", "phase": "failed_pushing"}), "")
-
-    def test_a_certified_transect_refuses_the_cancel(self):
-        for state in cme.CERTIFIED_PROJECT_STATES:
-            with self.subTest(state=state):
-                job = {"job_id": "j", "phase": "editing",
-                       "projects": {"MRS_T1_2023_2025.psx": {"state": "done"},
-                                    "MRS_T2_2023_2025.psx": {"state": state}}}
-                why = cme.cancel_refusal(job)
-                self.assertEqual(why, "MRS_T2_2023_2025.psx carries a certified edit; decide it in the Review queue "
-                                      "or upload it before cancelling.")
-        for state in ("todo", "editing", "done", "failed", "", None):
-            with self.subTest(state=state):
-                job = {"job_id": "j", "phase": "editing", "projects": {"x.psx": {"state": state}}}
-                self.assertEqual(cme.cancel_refusal(job), "")
-        # a malformed projects map refuses nothing extra and never raises
-        for junk in ("junk", ["x"], {"x.psx": "junk"}, None):
-            with self.subTest(projects=junk):
-                self.assertEqual(cme.cancel_refusal({"job_id": "j", "phase": "editing", "projects": junk}), "")
-
-    def test_prune_targets_are_anchored(self):
-        bench = tempfile.mkdtemp(prefix="vt-bench-")
-        try:
-            inside = os.path.join(bench, FOLDER)
-            os.makedirs(inside)
-            job = {"job_id": "j", "phase": "editing", "edit_bench": bench, "rows": [
-                {"readable_id": RID, "local_path": inside, "processing_folder": FOLDER},
-                {"readable_id": "X", "local_path": inside, "processing_folder": FOLDER},
-                {"readable_id": "Y", "local_path": "/tmp/ZZZ_T9_3D"},
-                {"readable_id": "Z", "local_path": os.path.join(bench, "notes")},
-                {"readable_id": "W", "local_path": "", "processing_folder": "LBH_T2_3D"},
-                {"readable_id": "V", "local_path": os.path.join(bench, "..", "ZZZ_T8_3D")},
-                "junk",
-            ]}
-            self.assertEqual(cme.prune_targets(job),
-                             [os.path.realpath(inside), os.path.realpath(os.path.join(bench, "LBH_T2_3D"))])
-            self.assertEqual(cme.prune_targets({"job_id": "j", "phase": "editing", "edit_bench": "relative"}), [])
-        finally:
-            shutil.rmtree(bench, ignore_errors=True)
-
-    def test_summarise_shape(self):
-        job = {"job_id": "ME-1", "phase": "editing", "created_by": "LO", "created_at": "t", "edit_bench": "/b",
-               "rows": [{"readable_id": RID, "site": "MRS", "transect": "T1", "shelf_location": "s"}],
-               "phase_history": [{"phase": "draft", "at": "t", "by": "LO", "reason": ""}] * 12}
-        summary = cme.summarise(job, tail_lines=["a", "b"])
-        self.assertTrue(summary["can_cancel"])
-        self.assertTrue(summary["will_prune"])
-        self.assertEqual(len(summary["history"]), cme.HISTORY_TAIL)
-        self.assertEqual(summary["log_tail"], ["a", "b"])
-        self.assertEqual(summary["rows"][0]["site"], "MRS")
-        pushed = cme.summarise(dict(job, phase="failed_pushing"))
-        self.assertFalse(pushed["will_prune"])
-        self.assertTrue(pushed["reached_pushing"])
+    def test_the_cancel_reason_names_this_page(self):
+        self.assertEqual(cme.CANCEL_REASON, "cancelled from the Atlas control panel")
 
 
-class WithStores(unittest.TestCase):
+class CancelAndPruneTests(unittest.TestCase):
+    """Cancel and prune through the one cancel, against a real job store and a scratch registry."""
+
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="vt-cme-")
         os.environ["VICARIUS_3D_REGISTRY_ROOT"] = self.root
@@ -171,261 +131,246 @@ class WithStores(unittest.TestCase):
         self.bench = os.path.join(self.root, "editbench")
         os.makedirs(self.bench)
         self.store = jobstore.JobStore(self.root)
-        self.shelf = f"{HOST}:{SHELF_PARENT}/{FOLDER}"
         seed_status(self.registry, RID, "editing", site="MRS", transect="T1", year="2023", season_token="ann",
                     step1_status="complete", processing_location=os.path.join(self.bench, FOLDER),
                     processing_folder=FOLDER)
         self.job = self.store.create_job(
             [{"readable_id": RID, "site": "MRS", "transect": "T1", "processing_folder": FOLDER,
-              "shelf_location": f"{SHELF_PARENT}/{FOLDER}", "psx_basename": "MRS_T1_2023_2023.psx"}],
-            self.bench, "LO")
+              "shelf_location": f"{SHELF_PARENT}/{FOLDER}", "psx_basename": PSX}], self.bench, "LO")
+        self.job_id = self.job["job_id"]
         self.local = os.path.join(self.bench, FOLDER)
         os.makedirs(self.local)
-        Path(self.local, "MRS_T1_2023_2023.psx").write_bytes(b"psx")
+        Path(self.local, PSX).write_bytes(b"psx")
+        old = time.time() - 3600
+        os.utime(os.path.join(self.local, PSX), (old, old))
+        self.deps = transfers.Deps(
+            ssh_factory=None, transfer_fn=None, remote_spec_fn=None, archive_fn=None, launch_fn=None,
+            run_async=None, watchers=watcher.WatcherRegistry(poll_s=60), site_names_fn=dict, snapshot_fn=None,
+            metashape_executable_fn=None, legs=transfers.LegRegistry(), project_legs=transfers.ProjectLegRegistry())
 
     def tearDown(self):
+        self.deps.watchers.stop_all(2)
         os.environ.pop("VICARIUS_3D_REGISTRY_ROOT", None)
         shutil.rmtree(self.root, ignore_errors=True)
         import registry
         importlib.reload(registry)
 
-    def advance(self, *phases):
-        """Walk the job through phases as LO.
+    def pulled(self):
+        """Walk the job to editing the way the pull does."""
+        self.store.transition(self.job_id, jobstore.PULLING, "LO")
+        self.store.transition(self.job_id, jobstore.EDITING, "LO", transfers.PULL_VERIFIED_REASON)
+        self.store.init_projects(self.job_id)
 
-        The moves a job still makes (pulling, editing) go through
-        jobstore.transition. The job-wide checks, certify, push and verify
-        phases, and done, are ones jobstore now only reads from an older job
-        file (RETIRED_PHASES; no move reaches done until Finish project), so
-        they are written into the record the way such a file carries them.
-        """
-        live = (jobstore.PULLING, jobstore.EDITING)
-        for phase in phases:
-            reason = "test" if phase.startswith(jobstore.FAILED_PREFIX) else ""
-            if phase in live:
-                self.store.transition(self.job["job_id"], phase, "LO", reason=reason)
-                continue
-            record = self.store.load_job(self.job["job_id"])
-            record["phase"] = phase
-            record["phase_history"].append({"phase": phase, "at": LEGACY_PHASE_AT, "by": "LO", "reason": reason})
-            self.store.save_job(record)
+    def cancel(self):
+        """Cancel and prune as the page's route does; returns the answer."""
+        return transfers.cancel_job(self.deps, self.store, self.job_id, "LO", cme.CANCEL_REASON, prune=True)
 
-    def test_cancel_before_pushing_prunes_and_restores(self):
-        self.advance("pulling", "editing")
-        result = cme.cancel_and_prune(self.store, self.registry, self.job["job_id"], "lo")
-        self.assertEqual(result["phase"], "cancelled")
-        self.assertEqual(result["pruned"], [os.path.realpath(self.local)])
-        self.assertFalse(os.path.exists(self.local))
-        row = self.registry.get(RID)
-        self.assertEqual(row["processing_location"], f"{SHELF_PARENT}/{FOLDER}")
-        self.assertEqual(row["manual_edit_status"], "awaiting")
-        self.assertEqual(row["manual_edit_done"], "")
-        self.assertIsNone(self.store.current())
-        record = self.store.load_job(self.job["job_id"])
-        self.assertEqual(record["phase"], "cancelled")
-        self.assertTrue(record["cleanup"]["local_deleted"])
-        self.assertEqual(record["cleanup"]["by"], "voyager_tools:LO")
-        self.assertEqual(record["phase_history"][-1]["by"], "voyager_tools:LO")
-        events = Path(self.root, "events.csv").read_text()
-        self.assertIn("voyager_tools:LO", events)
-        self.assertEqual(result["restored"][0], {"readable_id": RID, "location_restored": True,
-                                                 "status_reset": True, "missing": False, "status_kept": None})
-        self.assertIn(f",voyager_tools:LO,{RID},manual_edit_status,editing,awaiting\n", events)
-
-    def test_cancel_after_a_failed_push_keeps_the_local_copy(self):
-        self.advance("pulling", "editing", "certified", "pushing", "failed_pushing")
-        result = cme.cancel_and_prune(self.store, self.registry, self.job["job_id"], "LO")
-        self.assertEqual(result["pruned"], [])
-        self.assertEqual(result["kept"], [os.path.realpath(self.local)])
-        self.assertTrue(os.path.exists(self.local))
-        self.assertTrue(result["warnings"])
-        self.assertEqual(self.store.load_job(self.job["job_id"])["phase"], "cancelled")
-
-    def test_in_flight_and_terminal_refused(self):
-        self.advance("pulling")
-        with self.assertRaises(cme.CancelRefused):
-            cme.cancel_and_prune(self.store, self.registry, self.job["job_id"], "LO")
-        self.assertTrue(os.path.exists(self.local))
+    def assert_refused(self, fragment):
+        """The cancel is refused with a sentence holding `fragment`; nothing moved."""
+        phase = self.store.load_job(self.job_id)["phase"]
+        with self.assertRaises((transfers.TransferRefused, jobstore.TransitionError)) as caught:
+            self.cancel()
+        self.assertIn(fragment, str(caught.exception))
+        self.assertEqual(self.store.load_job(self.job_id)["phase"], phase)
+        self.assertTrue(os.path.isdir(self.local))
         self.assertEqual(self.registry.get(RID)["manual_edit_status"], "editing")
-        self.advance("editing", "certified", "pushing")
-        with self.assertRaises(cme.CancelRefused):
-            cme.cancel_and_prune(self.store, self.registry, self.job["job_id"], "LO")
-        self.advance("verifying", "done")
-        with self.assertRaises(cme.CancelRefused):
-            cme.cancel_and_prune(self.store, self.registry, self.job["job_id"], "LO")
 
-    def test_unknown_job_and_bad_initials(self):
-        with self.assertRaises(jobstore.JobNotFound):
-            cme.cancel_and_prune(self.store, self.registry, "ME-20260101-000000-ZZ", "LO")
-        with self.assertRaises(ValueError):
-            cme.cancel_and_prune(self.store, self.registry, self.job["job_id"], "L O")
-        self.assertIsNotNone(self.store.current())
-
-    def test_prune_failure_reported_and_job_still_cancelled(self):
-        self.advance("pulling", "editing")
-
-        def boom(path):
-            raise OSError("busy")
-        result = cme.cancel_and_prune(self.store, self.registry, self.job["job_id"], "LO", rmtree_fn=boom)
-        self.assertEqual(result["phase"], "cancelled")
-        self.assertIn("Could not remove", result["problems"][0])
-        self.assertEqual(result["kept"], [os.path.realpath(self.local)])
-        self.assertFalse(self.store.load_job(self.job["job_id"])["cleanup"]["local_deleted"])
-
-    def test_missing_registry_row_is_reported_not_fatal(self):
-        self.registry.delete_row(RID, "seed")
-        self.advance("pulling", "editing")
-        result = cme.cancel_and_prune(self.store, self.registry, self.job["job_id"], "LO")
-        self.assertTrue(result["restored"][0]["missing"])
-        self.assertEqual(result["phase"], "cancelled")
-
-    def test_restore_is_idempotent(self):
-        seed_status(self.registry, RID, "awaiting", processing_location=f"{SHELF_PARENT}/{FOLDER}")
-        before = Path(self.root, "events.csv").read_text()
-        cme.restore_registry(self.job, self.registry, "voyager_tools:LO")
-        self.assertEqual(Path(self.root, "events.csv").read_text(), before)
-
-    def test_restore_prepends_shelf_prefix_to_a_bare_shelf_location(self):
-        # the job's own recorded shelf_location has no host prefix (the
-        # picker strips it): restore_registry must add one back so the
-        # restored cell reads as a real Shelf path, not a local one.
-        self.assertEqual(self.job["rows"][0]["shelf_location"], f"{SHELF_PARENT}/{FOLDER}")
-        cme.restore_registry(self.job, self.registry, "voyager_tools:LO", shelf_prefix=f"{HOST}:")
-        self.assertEqual(self.registry.get(RID)["processing_location"], f"{HOST}:{SHELF_PARENT}/{FOLDER}")
-
-    def test_restore_leaves_an_already_prefixed_shelf_location_alone(self):
-        prefixed_job = dict(self.job)
-        prefixed_job["rows"] = [dict(self.job["rows"][0])]
-        prefixed_job["rows"][0]["shelf_location"] = f"{HOST}:{SHELF_PARENT}/{FOLDER}"
-        cme.restore_registry(prefixed_job, self.registry, "voyager_tools:LO", shelf_prefix=f"{HOST}:")
-        self.assertEqual(self.registry.get(RID)["processing_location"], f"{HOST}:{SHELF_PARENT}/{FOLDER}")
-
-    def test_restore_with_an_empty_prefix_keeps_todays_bare_behaviour(self):
-        cme.restore_registry(self.job, self.registry, "voyager_tools:LO")
-        self.assertEqual(self.registry.get(RID)["processing_location"], f"{SHELF_PARENT}/{FOLDER}")
-
-    def _write_raw_status(self, value):
-        """Hand-edit the row's status cell the way a spreadsheet would (upsert refuses unknown values)."""
-        rows = self.registry._read_rows()
-        for r in rows:
-            if r["readable_id"] == RID:
-                r["manual_edit_status"] = value
-        self.registry._write_rows(rows)
-
-    def test_restore_moves_only_a_row_still_at_editing(self):
-        shelf = f"{SHELF_PARENT}/{FOLDER}"
-        relocated = self.registry.MANUAL_EDIT_VOYAGER1_ELIGIBLE + (self.registry.ME_EDITING,)
-        for status in self.registry.MANUAL_EDIT_STATUSES + ("Reviewed",):
-            with self.subTest(status=status):
-                self.registry.upsert(RID, {"processing_location": self.local, "manual_edit_done": ""}, "seed")
-                self._write_raw_status(status)
-                result = cme.restore_registry(self.job, self.registry, "voyager_tools:LO")[0]
-                row = self.registry.get(RID)
-                if status == self.registry.ME_EDITING:
-                    self.assertEqual(row["manual_edit_status"], self.registry.ME_AWAITING)
-                    self.assertTrue(result["status_reset"])
-                    self.assertIsNone(result["status_kept"])
-                else:
-                    self.assertEqual(row["manual_edit_status"], status)
-                    self.assertFalse(result["status_reset"])
-                    self.assertEqual(result["status_kept"], status)
-                if status in relocated:
-                    self.assertEqual(row["processing_location"], shelf)
-                    self.assertTrue(result["location_restored"])
-                else:
-                    self.assertEqual(row["processing_location"], self.local)
-                    self.assertFalse(result["location_restored"])
-
-    def test_restore_keeps_a_done_stamp_it_does_not_own(self):
-        seed_status(self.registry, RID, "done", "2026-09-26 21:07:00")
-        cme.restore_registry(self.job, self.registry, "voyager_tools:LO")
+    def test_an_untouched_copy_is_removed_and_the_row_goes_back_to_the_shelf(self):
+        self.pulled()
+        answer = self.cancel()
+        self.assertEqual(answer["job"]["phase"], "cancelled")
+        self.assertEqual((answer["rows_reset"], answer["removed"], answer["kept_on_bench"]), ([RID], [FOLDER], []))
+        self.assertFalse(os.path.lexists(self.local))
         row = self.registry.get(RID)
-        self.assertEqual((row["manual_edit_status"], row["manual_edit_done"]), ("done", "2026-09-26 21:07:00"))
+        self.assertEqual(row["manual_edit_status"], "awaiting")
+        self.assertEqual(row["processing_location"], transfers.SHELF_PREFIX + f"{SHELF_PARENT}/{FOLDER}")
+        self.assertEqual(self.store.load_job(self.job_id)["phase_history"][-1]["reason"], cme.CANCEL_REASON)
 
-    def test_restore_writes_through_the_named_reset_under_the_upsert_guard(self):
-        self.registry.MANUAL_EDIT_UPSERT_GUARD = True
-        cme.restore_registry(self.job, self.registry, "voyager_tools:LO")
-        self.assertEqual(self.registry.get(RID)["manual_edit_status"], "awaiting")
-        self._write_raw_status("done")
-        cme.restore_registry(self.job, self.registry, "voyager_tools:LO")
-        self.assertEqual(self.registry.get(RID)["manual_edit_status"], "done")
+    def test_a_copy_opened_in_metashape_stays_with_its_sentence(self):
+        self.pulled()
+        self.store.append_open_event(self.job_id, PSX, "open", by="AB")
+        answer = self.cancel()
+        self.assertTrue(os.path.isdir(self.local))
+        self.assertIn("was opened in Metashape", answer["kept_reasons"][FOLDER])
+        self.assertEqual(answer["kept_on_bench"], [FOLDER])
 
-    def test_cancel_refused_while_the_registry_records_a_certified_edit(self):
-        self.advance("pulling", "editing")
+    def test_a_copy_saved_after_the_pull_stays(self):
+        self.pulled()
+        later = time.time() + 60
+        os.utime(os.path.join(self.local, PSX), (later, later))
+        answer = self.cancel()
+        self.assertTrue(os.path.isdir(self.local))
+        self.assertIn("was saved after the pull", answer["kept_reasons"][FOLDER])
+
+    def test_a_copy_that_reached_editing_without_a_verified_pull_stays(self):
+        self.store.transition(self.job_id, jobstore.PULLING, "LO")
+        self.store.transition(self.job_id, jobstore.EDITING, "LO", "migration-B2: the phase checking was retired")
+        answer = self.cancel()
+        self.assertTrue(os.path.isdir(self.local))
+        self.assertIn("records no verified pull", answer["kept_reasons"][FOLDER])
+
+    def test_a_pull_still_copying_is_refused(self):
+        self.store.transition(self.job_id, jobstore.PULLING, "LO")
+        transfers.legs_of(self.deps).begin(self.job_id)
+        self.assert_refused("still copying")
+
+    def test_a_pull_a_restart_stranded_is_recovered_then_cancelled(self):
+        self.store.transition(self.job_id, jobstore.PULLING, "LO")
+        answer = self.cancel()
+        phases = [entry["phase"] for entry in answer["job"]["phase_history"]]
+        self.assertEqual(phases[-2:], ["failed_pulling", "cancelled"])
+
+    def test_a_running_project_leg_is_refused(self):
+        self.pulled()
+        transfers.project_legs_of(self.deps).begin(self.job_id, PSX, "Check scales")
+        self.assert_refused(f"Check scales is running on {PSX}")
+
+    def test_a_metashape_holding_the_transect_is_refused(self):
+        self.pulled()
+        with mock.patch.object(transfers.sessions, "psx_held", return_value=True):
+            self.assert_refused(f"Metashape holds {PSX}")
+
+    def test_every_marked_transect_state_is_refused(self):
+        self.pulled()
+        for state, word in (("review", "marked for admin review"), ("upload", "marked for re-upload"),
+                            ("uploading", "uploading"), ("restarting", "starting over")):
+            with self.subTest(state=state):
+                record = self.store.load_job(self.job_id)
+                record["projects"][PSX]["state"] = state
+                if state == "restarting":
+                    record["projects"][PSX]["restart"] = {"stage": "space", "aside": "", "error": ""}
+                self.store.save_job(record)
+                self.assert_refused(word)
+
+    def test_a_row_the_atlas_reads_as_marked_is_refused(self):
+        self.pulled()
         for status in ("review", "upload"):
             with self.subTest(status=status):
-                self._write_raw_status(status)
-                before = Path(self.root, "events.csv").read_text()
-                with self.assertRaises(cme.CancelRefused) as caught:
-                    cme.cancel_and_prune(self.store, self.registry, self.job["job_id"], "LO")
-                self.assertEqual(str(caught.exception),
-                                 f"{RID} carries a certified edit (manual edit status {status}); decide it in the "
-                                 f"Review queue or upload it before cancelling.")
-                self.assertTrue(os.path.exists(self.local))
-                self.assertEqual(self.registry.get(RID)["manual_edit_status"], status)
-                self.assertEqual(Path(self.root, "events.csv").read_text(), before)
-                self.assertEqual(self.store.load_job(self.job["job_id"])["phase"], "editing")
+                seed_status(self.registry, RID, status)
+                with self.assertRaises(transfers.TransferRefused) as caught:
+                    self.cancel()
+                self.assertIn("in the atlas, so the project cannot be cancelled", str(caught.exception))
+                self.assertEqual(self.store.load_job(self.job_id)["phase"], "editing")
 
-    def test_a_status_vicarius_does_not_know_refuses_the_cancel_under_the_upsert_guard(self):
-        """The upsert guard compares the raw cell, so a padded " editing " would fail the restore write
-        partway; the cancel refuses it before anything is written or removed."""
-        self.registry.MANUAL_EDIT_UPSERT_GUARD = True
-        self.advance("pulling", "editing")
-        for value in (" editing ", "Reviewed", " awaiting", " "):
-            with self.subTest(value=value):
-                self._write_raw_status(value)
-                before = Path(self.root, "events.csv").read_text()
-                with self.assertRaises(cme.CancelRefused) as caught:
-                    cme.cancel_and_prune(self.store, self.registry, self.job["job_id"], "LO")
-                self.assertEqual(str(caught.exception),
-                                 f"{RID} holds the manual edit status {value!r}, which VICARIUS does not know; "
-                                 f"repair it from the atlas in admin mode first.")
-                self.assertTrue(os.path.exists(self.local))
-                self.assertEqual(self.registry.get(RID)["manual_edit_status"], value)
-                self.assertEqual(Path(self.root, "events.csv").read_text(), before)
-                self.assertEqual(self.store.load_job(self.job["job_id"])["phase"], "editing")
-                summary = cme.summarise(self.store.load_job(self.job["job_id"]), registry_mod=self.registry)
-                self.assertFalse(summary["can_cancel"])
+    def test_a_value_vicarius_does_not_know_is_refused_until_repaired(self):
+        self.pulled()
+        for raw in (" editing ", "Editing", "certified"):
+            with self.subTest(raw=raw):
+                seed_status(self.registry, RID, raw)
+                with self.assertRaises(transfers.TransferRefused) as caught:
+                    self.cancel()
+                self.assertIn("repair it from the atlas", str(caught.exception))
+                self.assertTrue(os.path.isdir(self.local))
 
-    def test_restore_leaves_a_padded_editing_cell_alone_under_the_upsert_guard(self):
-        self.registry.MANUAL_EDIT_UPSERT_GUARD = True
-        self._write_raw_status(" editing ")
-        result = cme.restore_registry(self.job, self.registry, "voyager_tools:LO")[0]
-        self.assertFalse(result["status_reset"])
-        self.assertFalse(result["location_restored"])
-        self.assertEqual(result["status_kept"], " editing ")
-        self.assertEqual(self.registry.get(RID)["manual_edit_status"], " editing ")
+    def test_a_mark_done_note_of_this_round_is_refused(self):
+        self.pulled()
+        self.registry.append_notes([RID], self.job_id, PSX, 0, "editor_explanation", "scale", "One board only.", "AB",
+                                   actor="manual_edit:AB", source_id="CR-20260927-100000-AB")
+        self.assert_refused(f"{PSX} holds an explanation from Mark done")
 
-    def test_restore_moves_the_location_of_an_awaiting_row_only_off_the_bench(self):
-        """A blank or awaiting row keeps its status; its location is restored only when it points at the
-        edit bench copy the prune removes, never over a value someone else wrote."""
-        elsewhere = f"{HOST}:/volume6/Archive8_12TB/driver_deposits/run2/{FOLDER}"
-        for status in self.registry.MANUAL_EDIT_VOYAGER1_ELIGIBLE:
-            with self.subTest(status=status):
-                self.registry.upsert(RID, {"processing_location": elsewhere}, "seed")
-                self._write_raw_status(status)
-                result = cme.restore_registry(self.job, self.registry, "voyager_tools:LO")[0]
-                self.assertFalse(result["location_restored"])
-                self.assertEqual(self.registry.get(RID)["processing_location"], elsewhere)
-                self.registry.upsert(RID, {"processing_location": self.local + "/"}, "seed")
-                result = cme.restore_registry(self.job, self.registry, "voyager_tools:LO")[0]
-                self.assertTrue(result["location_restored"])
-                self.assertEqual(self.registry.get(RID)["processing_location"], f"{SHELF_PARENT}/{FOLDER}")
+    def test_a_note_of_an_earlier_round_refuses_nothing(self):
+        self.pulled()
+        self.registry.append_notes([RID], self.job_id, PSX, 1, "check_note", "", "Earlier round.", "AB",
+                                   actor="manual_edit:AB", source_id="CR-20260927-100000-AB")
+        self.assertEqual(self.cancel()["rows_reset"], [RID])
 
-    def test_summarise_names_the_registry_refusal_when_given_the_registry(self):
-        self._write_raw_status("review")
-        summary = cme.summarise(self.store.load_job(self.job["job_id"]), registry_mod=self.registry)
-        self.assertFalse(summary["can_cancel"])
-        self.assertFalse(summary["will_prune"])
-        self.assertIn("certified edit", summary["refusal"])
-        self.assertTrue(cme.summarise(self.store.load_job(self.job["job_id"]))["can_cancel"])
+    def test_a_migration_note_refuses_nothing(self):
+        self.pulled()
+        self.registry.append_notes([RID], self.job_id, PSX, 0, "check_note", "", "Sent back for the checks.", "LO",
+                                   actor="manual_edit:LO", source_id=f"{self.job_id}:{PSX}:migration-B0c")
+        self.assertEqual(self.cancel()["rows_reset"], [RID])
 
-    def test_cancel_and_prune_forwards_shelf_prefix(self):
-        self.advance("pulling", "editing")
-        result = cme.cancel_and_prune(self.store, self.registry, self.job["job_id"], "LO",
-                                      shelf_prefix=f"{HOST}:")
-        self.assertTrue(result["restored"][0]["location_restored"])
-        self.assertEqual(self.registry.get(RID)["processing_location"], f"{HOST}:{SHELF_PARENT}/{FOLDER}")
+    def test_a_row_with_no_registry_entry_refuses_nothing(self):
+        self.pulled()
+        rows = [row for row in self.registry._read_rows() if row["readable_id"] != RID]
+        self.registry._write_rows(rows)
+        answer = self.cancel()
+        self.assertEqual((answer["job"]["phase"], answer["rows_reset"]), ("cancelled", []))
 
+    def test_a_folder_a_transfer_holds_stays(self):
+        self.pulled()
+        with mock.patch.object(transfers, "_try_folder_lock", return_value=None):
+            answer = self.cancel()
+        self.assertTrue(os.path.isdir(self.local))
+        self.assertIn("A transfer holds", answer["kept_reasons"][FOLDER])
+
+    def test_a_folder_that_is_a_symlink_is_never_followed(self):
+        self.pulled()
+        real = os.path.join(self.root, "elsewhere", FOLDER)
+        os.makedirs(os.path.dirname(real))
+        shutil.move(self.local, real)
+        os.symlink(real, self.local)
+        answer = self.cancel()
+        self.assertTrue(os.path.isdir(real))
+        self.assertIn("symlink", answer["kept_reasons"][FOLDER])
+
+    def test_an_unknown_job_is_not_found(self):
+        with self.assertRaises(jobstore.JobNotFound):
+            transfers.cancel_job(self.deps, self.store, "ME-20260101-000000-ZZ", "LO", prune=True)
+
+    def test_initials_that_break_the_rule_are_refused_before_anything(self):
+        self.pulled()
+        for bad in ("", "L O", "L0", "ABCDE", None, 7):
+            with self.subTest(initials=bad), self.assertRaises(ValueError):
+                transfers.cancel_job(self.deps, self.store, self.job_id, bad, prune=True)
+        self.assertEqual(self.store.load_job(self.job_id)["phase"], "editing")
+
+    def test_a_finished_project_is_refused(self):
+        self.pulled()
+        self.cancel()
+        with self.assertRaises(transfers.TransferRefused) as caught:
+            self.cancel()
+        self.assertIn("nothing to cancel", str(caught.exception))
+
+    def test_the_watcher_is_stopped(self):
+        self.pulled()
+        self.deps.watchers.start(self.store, self.store.load_job(self.job_id))
+        self.assertTrue(self.deps.watchers.running(self.job_id))
+        self.cancel()
+        self.assertFalse(self.deps.watchers.running(self.job_id))
+
+    def test_the_job_log_names_what_went_and_what_stayed(self):
+        self.pulled()
+        self.store.append_open_event(self.job_id, PSX, "open", by="AB")
+        self.cancel()
+        line = self.store.tail_log(self.job_id, 5)[-1]
+        self.assertIn("cancelled by LO", line)
+        self.assertIn(f"left on the edit bench: {FOLDER}", line)
+
+
+    def test_an_uploaded_transect_with_confirm_notes_does_not_hold_the_cancel(self):
+        """An upload raises no round, so an uploaded transect's Confirm notes stay current and must hold nothing."""
+        done_id, editing_id = "MRS_T2_2023ann", "MRS_T3_2023ann"
+        done_psx, editing_psx = "MRS_T2_2023_2023.psx", "MRS_T3_2023_2023.psx"
+        rows = []
+        for rid, transect, psx in ((done_id, "T2", done_psx), (editing_id, "T3", editing_psx)):
+            folder = f"MRS_{transect}_3D"
+            seed_status(self.registry, rid, "editing", site="MRS", transect=transect, year="2023",
+                        season_token="ann", step1_status="complete", processing_folder=folder,
+                        processing_location=os.path.join(self.bench, folder))
+            rows.append({"readable_id": rid, "site": "MRS", "transect": transect, "processing_folder": folder,
+                         "shelf_location": f"{SHELF_PARENT}/{folder}", "psx_basename": psx})
+        job_id = self.store.create_job(rows, self.bench, "AB")["job_id"]
+        self.store.transition(job_id, jobstore.PULLING, "AB")
+        self.store.transition(job_id, jobstore.EDITING, "AB", transfers.PULL_VERIFIED_REASON)
+        record = self.store.init_projects(job_id)
+        record["projects"][done_psx].update(state="done", removed_at="2026-09-27T21:30:00-04:00")
+        self.store.save_job(record)
+        seed_status(self.registry, done_id, "done", done_at="2026-09-27 21:25",
+                    processing_location=transfers.SHELF_PREFIX + f"{SHELF_PARENT}/MRS_T2_3D")
+        self.registry.append_notes([done_id], job_id, done_psx, 0, "check_note", "", "Explained at Confirm.", "AB",
+                                   actor="manual_edit:AB", source_id="CR-20260927-210000-AB")
+        editing_local = os.path.join(self.bench, "MRS_T3_3D")
+        os.makedirs(editing_local)
+        Path(editing_local, editing_psx).write_bytes(b"psx")
+        old = time.time() - 3600
+        os.utime(os.path.join(editing_local, editing_psx), (old, old))
+        answer = transfers.cancel_job(self.deps, self.store, job_id, "LO", cme.CANCEL_REASON, prune=True)
+        self.assertEqual(answer["job"]["phase"], "cancelled")
+        self.assertEqual(answer["rows_reset"], [editing_id])
+        self.assertEqual(self.registry.get(done_id)["manual_edit_status"], "done")
+        self.assertEqual(self.registry.get(editing_id)["manual_edit_status"], "awaiting")
+        self.assertEqual(answer["removed"], ["MRS_T3_3D"])
 
 if __name__ == "__main__":
     unittest.main()
