@@ -61,10 +61,10 @@
   var LINE_RESTART_CHIP = "Driver batches use the new floors after the driver restarts";
   var LINE_NO_EDITOR_TIER = "The ladder file does not list the manual edit window tier yet.";
   var LINE_DRIFT_REASON = "Type a reason before recording the change as found.";
-  var LINE_ARCHIVE = "Archive the Shelf copy: before each upload the Shelf folder is renamed to <folder>_voy1_archive and kept.";
+  var LINE_ARCHIVE = "Archive the Shelf copy: before each upload the Shelf folder is renamed to <folder>_voy1_archive, or a name with the edit round when an earlier archive holds that one, and kept.";
   var TIP_RELOAD = "Read the stored values again to see whether the save happened.";
   var LINE_BAD_DAY = "Type the first day as YYYY-MM-DD, for example 2026-09-27.";
-  var LINE_SHELF_FIELD_TIP = "Pick whether an upload keeps the pre-edit Shelf folder or replaces it. VICARIUS asks for a reason and a confirmation for either change.";
+  var LINE_SHELF_FIELD_TIP = "Pick whether an upload keeps the pre-edit Shelf folder or replaces it; a retry keeps the mode its first attempt used. VICARIUS asks for a reason and a confirmation for either change.";
 
   /* ---- pure helpers (exported to node) ------------------------------------ */
 
