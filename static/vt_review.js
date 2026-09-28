@@ -66,8 +66,9 @@
   var INITIALS_RE = /^[A-Z]{2,4}$/;
   var REPORT_MAX_CHARS = 4000;          // program B's REVIEW_REPORT_MAX_CHARS
   var INSTRUCTIONS_MAX_CHARS = 2000;    // program B's REVIEW_INSTRUCTIONS_MAX_CHARS
-  var LS_INITIALS = "vt.initials";      // the panel's own key, so the sidecar and the panel agree
+  var SS_REVIEW_INITIALS = "vt.initials"; // the panel's own session key, so the sidecar and the panel agree
   var SS_INITIALS = "vic_initials";     // the desktop login's typed initials
+  var LINE_NO_EDITOR = "no editor on record";
   var AST_ZONE = "America/Puerto_Rico"; // Atlantic Standard Time all year, no daylight saving
   var AST_OFFSET = "-04:00";
   var DECISIONS = ["upload", "return", "restart"];
@@ -466,20 +467,22 @@
   }
 
   // Who the review names as the editor: whoever certified the edit, else the
-  // project's creator (the Review queue row reads the same order).
+  // last person the open route recorded (the dossier's editor), never the
+  // project's creator; "" when nobody is on record.
   function editorOf(d) {
     var c = isObject(d.certification) ? d.certification : {};
     return String(c.by || d.editor || "");
   }
 
-  // The state chip, the round and the editor on one line.
+  // The state chip, the round and the editor on one line; a record that
+  // names nobody says so rather than leaving the reader to guess.
   function factsHtml(d) {
     var round = roundLabel(d.round);
     var badge = stateBadge(d);
     var editor = editorOf(d);
     return '<p class="vt-review-facts"><span data-review-part="state">' + stateHtml(badge.role, badge.words) +
       "</span>" + (round ? '<span class="count">' + esc(round) + "</span>" : "") +
-      (editor ? '<span class="count">edited by ' + esc(editor) + "</span>" : "") + "</p>";
+      '<span class="count">' + esc(editor ? "edited by " + editor : LINE_NO_EDITOR) + "</span></p>";
   }
 
   // One definition-list row: the label with its "?" glyph, the control beside it.
@@ -741,13 +744,18 @@
                               body: JSON.stringify(body) });
   }
 
-  function readStore(key) { try { return window.localStorage.getItem(key); } catch (e) { return null; } }
-  function writeStore(key, value) { try { window.localStorage.setItem(key, value); } catch (e) { /* the review still works */ } }
+  // The initials live for this browser session only (sessionStorage), as in
+  // the walkthrough and the checks window, so the next person at the machine
+  // never finds the last reviewer's initials filled in (V-claim-audit-10).
+  function readSession(key) { try { return window.sessionStorage.getItem(key); } catch (e) { return null; } }
+  function writeSession(key, value) { try { window.sessionStorage.setItem(key, value); } catch (e) { /* the review still works */ } }
+  // forgetOldInitials: an earlier build kept the initials in browser-wide
+  // storage under the same key; that copy is removed so it fills nothing.
+  function forgetOldInitials() { try { window.localStorage.removeItem(SS_REVIEW_INITIALS); } catch (e) { /* nothing kept */ } }
 
-  // The initials this browser remembers: the panel's key, then the desktop login's typed value.
+  // The initials this session remembers: the panel's key, then the desktop login's typed value.
   function rememberedInitials() {
-    var v = readStore(LS_INITIALS);
-    if (!v) { try { v = window.sessionStorage.getItem(SS_INITIALS); } catch (e) { v = null; } }
+    var v = readSession(SS_REVIEW_INITIALS) || readSession(SS_INITIALS);
     return String(v || "").trim().toUpperCase();
   }
 
@@ -930,7 +938,7 @@
     }
 
     function rememberInitials(value) {
-      writeStore(LS_INITIALS, value);
+      writeSession(SS_REVIEW_INITIALS, value);
       if (panelInitials) panelInitials.value = value;
     }
 
@@ -1271,5 +1279,6 @@
     return load;
   });
 
+  forgetOldInitials();
   window.VoyagerTools = Object.assign(window.VoyagerTools || {}, { mountReview: mountReview });
 })();

@@ -69,7 +69,9 @@
   var ROLES_CSS = "vicarius_roles.css";
   var ROOT_CLASS = "voyager-tools";
   var LS_TAB = "vt.tab";
-  var LS_INITIALS = "vt.initials";
+  // The initials live for this browser session only, as in every window of
+  // the chain (V-claim-audit-10): the review pane reads the same key.
+  var SS_PANEL_INITIALS = "vt.initials";
   var SS_INITIALS = "vic_initials";
   // Two to four letters after trimming and upper-casing: the registry's
   // MANUAL_EDIT_INITIALS_PATTERN, the one initials rule of the chain.
@@ -147,6 +149,8 @@
 
   function readStore(key) { try { return window.localStorage.getItem(key); } catch (e) { return null; } }
   function writeStore(key, value) { try { window.localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
+  function readSession(key) { try { return window.sessionStorage.getItem(key); } catch (e) { return null; } }
+  function writeSession(key, value) { try { window.sessionStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 
   function gb(bytes) {
     var n = Number(bytes);
@@ -343,15 +347,17 @@
     // line and registry event carries them).
     var initialsEl = root.querySelector("#vt-initials");
     function initialsSeed() {
-      var v = readStore(LS_INITIALS);
-      if (!v) { try { v = window.sessionStorage.getItem(SS_INITIALS); } catch (e) { v = null; } }
+      var v = readSession(SS_PANEL_INITIALS) || readSession(SS_INITIALS);
       return (v || "").trim().toUpperCase();
     }
+    // An earlier build kept the initials in browser-wide storage under the
+    // same key; that copy is removed so it never fills the box.
+    try { window.localStorage.removeItem(SS_PANEL_INITIALS); } catch (e) { /* nothing kept */ }
     if (initialsEl) {
       initialsEl.value = initialsSeed();
       initialsEl.addEventListener("change", function () {
         initialsEl.value = initialsEl.value.trim().toUpperCase();
-        writeStore(LS_INITIALS, initialsEl.value);
+        writeSession(SS_PANEL_INITIALS, initialsEl.value);
       });
     }
     function initials(resEl) {
@@ -361,7 +367,7 @@
         if (initialsEl) initialsEl.focus();
         return null;
       }
-      writeStore(LS_INITIALS, v);
+      writeSession(SS_PANEL_INITIALS, v);
       return v;
     }
 

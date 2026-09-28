@@ -229,6 +229,34 @@ class SidecarReview(ReviewCase):
         """.replace("__BENCH__", BENCH).replace("__SHELF__", SHELF)
         self.run_review("rv_record", steps)
 
+    def test_initials_belong_to_the_browser_session_and_an_old_copy_goes(self):
+        """V-claim-audit-10: the review keeps initials in session storage like the other windows; the last
+        reviewer's initials left in browser storage are removed and never fill the box."""
+        steps = r"""
+        check(results, 'old_copy_removed', localStorage.getItem('vt.initials') === null, String(localStorage.getItem('vt.initials')));
+        await mountFresh();
+        check(results, 'not_prefilled_from_the_old_copy', fld('initials').value !== 'ZZ', fld('initials').value);
+        check(results, 'still_gone', localStorage.getItem('vt.initials') === null);
+        """
+        head_extra = "try { localStorage.setItem('vt.initials', 'ZZ'); } catch (e) {}"
+        routes = self.routes()
+        head = (head_extra + SESSION_STUB + "window.__FRAGMENT__ = " + js(self.fragment) + ";"
+                + "window.__ROUTES__ = " + js(routes) + ";"
+                + f"var JOB = {json.dumps(JOB)}; var PSX = {json.dumps(PSX)}; var PROJECT = {json.dumps(PROJECT)};")
+        self.run_steps("rv_session_initials", REVIEW_PRELUDE + steps, None, head_js=head, initials=None)
+
+    def test_a_record_with_no_editor_says_so_and_never_names_the_creator(self):
+        """V-claim-audit-3: with no certifier and no live opener the review says no editor is on record."""
+        routes = self.routes()
+        routes["GET " + PROJECT + "/dossier"] = [{"body": {"dossier": dossier(editor="", certification=None)}}]
+        steps = r"""
+        await mountFresh();
+        check(results, 'no_editor_line', part('state').parentNode.textContent.indexOf('no editor on record') !== -1,
+              part('state').parentNode.textContent);
+        check(results, 'no_edited_by', host.textContent.indexOf('edited by') === -1);
+        """
+        self.run_review("rv_no_editor", steps, routes)
+
     def test_local_validation_posts_nothing(self):
         steps = r"""
         await mountFresh();
@@ -274,7 +302,8 @@ class SidecarReview(ReviewCase):
         check(results, 'closed_form', act('record').disabled && act('open').disabled && fld('report').disabled);
         check(results, 'state_chip', part('state').textContent === 'uploading to the Shelf', part('state').textContent);
         check(results, 'line', /^Marked for upload by LO at \d{4}-\d{2}-\d{2} \d{2}:\d{2} AST\.$/.test(line()), line());
-        check(results, 'remembered', localStorage.getItem('vt.initials') === 'LO');
+        check(results, 'remembered_for_the_session', sessionStorage.getItem('vt.initials') === 'LO' &&
+              localStorage.getItem('vt.initials') === null, String(localStorage.getItem('vt.initials')));
         act('close').click();
         check(results, 'close', window.__CLOSED__ === 1);
         """.replace("__MEV__", MANUAL_EDIT_VERSION)
