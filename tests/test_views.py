@@ -536,6 +536,7 @@ class ManualEditRoutes(ToolsCase):
         self.assertEqual(r.status_code, 200, r.get_json())
         self.assertEqual(r.get_json()["phase"], "cancelled")
         self.assertEqual((r.get_json()["rows_reset"], r.get_json()["pruned"]), ([RID_DONE], [FOLDER]))
+        self.assertEqual(r.get_json()["walkthrough_url"], f"/popout/manual-edit?job={job['job_id']}")
         self.assertFalse(local.exists())
         self.assertEqual(self.registry.get(RID_DONE)["manual_edit_status"], "awaiting")
         self.assertEqual(self.registry.get(RID_DONE)["processing_location"],
@@ -557,10 +558,36 @@ class ManualEditRoutes(ToolsCase):
         self.registry._write_rows(rows)
         summary = self.client.get("/voyager-tools/api/manual-edit").get_json()["jobs"][0]
         self.assertFalse(summary["can_cancel"])
-        self.assertIn("reads marked for admin review in the atlas record", summary["refusal"])
+        self.assertIn("is marked for admin review in the atlas", summary["refusal"])
         r = self.cancel(job_id=job["job_id"])
         self.assertEqual(r.status_code, 409)
         self.assertTrue(local.exists())
+
+    def test_a_panel_without_the_manual_edit_module_refuses_the_cancel(self):
+        """A standalone panel has no leg registries to judge from, so it lists the refusal and answers 409."""
+        self.unlock()
+        job, local = self.make_job()
+        self.jobs.transition(job["job_id"], "pulling", "LO")
+        self.jobs.transition(job["job_id"], "editing", "LO", self.transfers.PULL_VERIFIED_REASON)
+        views.deps.manual_edit_deps = lambda: None
+        summary = self.client.get("/voyager-tools/api/manual-edit").get_json()["jobs"][0]
+        self.assertEqual((summary["refusal"], summary["can_cancel"]), (views.LINE_CANCEL_ELSEWHERE, False))
+        r = self.cancel(job_id=job["job_id"])
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(r.get_json()["error"], views.LINE_CANCEL_ELSEWHERE)
+        self.assertTrue(local.exists())
+        self.assertEqual(self.jobs.load_job(job["job_id"])["phase"], "editing")
+
+    def test_the_list_recovers_a_checks_run_a_restart_stranded_before_judging(self):
+        """The cancel recovers first, so the list does too: a run stranded in reading must not keep Cancel off."""
+        self.unlock()
+        job, _local = self.make_job()
+        self.jobs.transition(job["job_id"], "pulling", "LO")
+        self.jobs.transition(job["job_id"], "editing", "LO", self.transfers.PULL_VERIFIED_REASON)
+        self.jobs.init_projects(job["job_id"])
+        self.jobs.begin_checks_run(job["job_id"], "MRS_T1_2023_2023.psx", by="LO")
+        summary = self.client.get("/voyager-tools/api/manual-edit").get_json()["jobs"][0]
+        self.assertTrue(summary["can_cancel"], summary["refusal"])
 
     def test_every_unfinished_project_is_listed_and_cancelled_on_its_own(self):
         self.unlock()

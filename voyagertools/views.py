@@ -65,7 +65,7 @@ URL_PREFIX = "/voyager-tools"
 MODULE_SLUG = "voyager_tools"
 DISPLAY_NAME = "Atlas control panel"
 UI_STYLE = "voyager_tools"
-ASSET_VERSION = "20260927l"
+ASSET_VERSION = "20260927m"
 ROOT_SECTION_PREFIX = '<section class="voyager-tools"'
 STATIC_JS = "voyager_tools.js"
 STATIC_SETTINGS_JS = "vt_settings.js"  # the settings and desktop panes (program C spec 5.3)
@@ -943,6 +943,11 @@ def _job_id(body: Mapping) -> str:
     return text
 
 
+def _walkthrough_url(job_id: str) -> str:
+    """The address of one manual edit project's walkthrough, where an admin removes the folders a cancel kept."""
+    return f"{importlib.import_module('manualedit.views').POPOUT_URL}?job={job_id}"
+
+
 def _cancel_refusal_of(job: Mapping, manual_deps) -> str:
     """The one cancel's judgement of one project for the page, or LINE_CANCEL_ELSEWHERE without the manual edit module."""
     if manual_deps is None:
@@ -950,17 +955,40 @@ def _cancel_refusal_of(job: Mapping, manual_deps) -> str:
     return _manual_edit_transfers().cancel_refusal(manual_deps, job)
 
 
+def _recovered_for_listing(job: Mapping, store, manual_deps) -> Mapping:
+    """The job after the recovery the one cancel runs first (a pull or a checks run a restart stranded).
+
+    Without it the list would judge a checks run a restart killed as still
+    running and keep Cancel and prune off, although the cancel itself
+    recovers the run and goes ahead. A recovery that fails is logged and the
+    job is judged as stored.
+    """
+    if manual_deps is None:
+        return job
+    try:
+        return _manual_edit_transfers().recover_stale_job(manual_deps, store, job)
+    except (_jobstore_module().JobStoreError, OSError, ValueError, TypeError) as exc:
+        current_app.logger.warning("voyager tools: the stranded leg recovery of %s stopped: %s",
+                                   job.get(JOB_ID_KEY), exc)
+        return job
+
+
 @voyager_tools_bp.route("/api/manual-edit", methods=["GET"])
 @guarded
 def api_manual_edit():
-    """Every unfinished manual edit project, summarised with the one cancel's judgement: {"jobs": [summary, ...]}."""
+    """Every unfinished manual edit project, recovered as the one cancel recovers it and summarised with its judgement.
+
+    Answers {"jobs": [summary, ...]}.
+    """
     store = deps.job_store()
     manual_deps = deps.manual_edit_deps()
     transfers = _manual_edit_transfers()
-    summaries = [clean_manual_edit.summarise(job, store.tail_log(job["job_id"], LOG_TAIL),
-                                             refusal=_cancel_refusal_of(job, manual_deps),
-                                             plan=transfers.prune_plan(job))
-                 for job in _unfinished_jobs()]
+    summaries = []
+    for job in _unfinished_jobs():
+        job = _recovered_for_listing(job, store, manual_deps)
+        summaries.append(clean_manual_edit.summarise(job, store.tail_log(job["job_id"], LOG_TAIL),
+                                                     refusal=_cancel_refusal_of(job, manual_deps),
+                                                     plan=transfers.prune_plan(job)))
     return jsonify({"jobs": summaries})
 
 
@@ -969,10 +997,11 @@ def api_manual_edit():
 def api_manual_edit_cancel():
     """Cancel and prune one unfinished project through the manual edit module's one cancel: {job_id, initials, confirm: true}.
 
-    Answers {ok, job_id, phase, rows_reset, pruned, kept, problems, warnings}:
-    the folders removed from the edit bench (only through the bench removal,
-    and only when untouched), the folders left there, one sentence per kept
-    folder, and any warning. 409 with the one cancel's sentence when it
+    Answers {ok, job_id, phase, rows_reset, pruned, kept, problems, warnings,
+    walkthrough_url}: the folders removed from the edit bench (only through
+    the bench removal, and only when untouched), the folders left there, one
+    sentence per kept folder, any warning, and the project's walkthrough,
+    where an admin removes a kept folder. 409 with the one cancel's sentence when it
     refuses, or when this app does not mount the manual edit module.
     """
     body = _json_body()
@@ -993,7 +1022,7 @@ def api_manual_edit_cancel():
     return jsonify({"ok": True, "job_id": job_id, "phase": answer["job"]["phase"],
                     "rows_reset": answer["rows_reset"], "pruned": answer["removed"],
                     "kept": answer["kept_on_bench"], "problems": list(answer["kept_reasons"].values()),
-                    "warnings": answer["warnings"]})
+                    "warnings": answer["warnings"], "walkthrough_url": _walkthrough_url(job_id)})
 
 
 # --- tools 4 and 5: rewind and spot redo ------------------------------------------------------

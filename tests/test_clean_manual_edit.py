@@ -69,10 +69,10 @@ class SummaryTests(unittest.TestCase):
 
     def test_the_plan_splits_into_folders_removed_and_sentences_kept(self):
         plan = [{"folder": FOLDER, "local_path": "/bench/MRS_T1_3D", "keep": ""},
-                {"folder": "MRS_T2_3D", "local_path": "/bench/MRS_T2_3D", "keep": "MRS_T2_3D stays on the edit bench."}]
+                {"folder": "MRS_T2_3D", "local_path": "/bench/MRS_T2_3D", "keep": "MRS_T2_3D stays: it was saved."}]
         summary = cme.summarise(JOB, [], plan=plan)
         self.assertEqual(summary["prune_targets"], [FOLDER])
-        self.assertEqual(summary["prune_kept"], ["MRS_T2_3D stays on the edit bench."])
+        self.assertEqual(summary["prune_kept"], ["MRS_T2_3D stays: it was saved."])
 
     def test_a_refusal_closes_the_cancel(self):
         summary = cme.summarise(JOB, [], refusal="The pull is still copying.")
@@ -249,7 +249,7 @@ class CancelAndPruneTests(unittest.TestCase):
                 seed_status(self.registry, RID, status)
                 with self.assertRaises(transfers.TransferRefused) as caught:
                     self.cancel()
-                self.assertIn("in the atlas record", str(caught.exception))
+                self.assertIn("in the atlas, so the project cannot be cancelled", str(caught.exception))
                 self.assertEqual(self.store.load_job(self.job_id)["phase"], "editing")
 
     def test_a_value_vicarius_does_not_know_is_refused_until_repaired(self):
@@ -337,6 +337,40 @@ class CancelAndPruneTests(unittest.TestCase):
         self.assertIn("cancelled by LO", line)
         self.assertIn(f"left on the edit bench: {FOLDER}", line)
 
+
+    def test_an_uploaded_transect_with_confirm_notes_does_not_hold_the_cancel(self):
+        """An upload raises no round, so an uploaded transect's Confirm notes stay current and must hold nothing."""
+        done_id, editing_id = "MRS_T2_2023ann", "MRS_T3_2023ann"
+        done_psx, editing_psx = "MRS_T2_2023_2023.psx", "MRS_T3_2023_2023.psx"
+        rows = []
+        for rid, transect, psx in ((done_id, "T2", done_psx), (editing_id, "T3", editing_psx)):
+            folder = f"MRS_{transect}_3D"
+            seed_status(self.registry, rid, "editing", site="MRS", transect=transect, year="2023",
+                        season_token="ann", step1_status="complete", processing_folder=folder,
+                        processing_location=os.path.join(self.bench, folder))
+            rows.append({"readable_id": rid, "site": "MRS", "transect": transect, "processing_folder": folder,
+                         "shelf_location": f"{SHELF_PARENT}/{folder}", "psx_basename": psx})
+        job_id = self.store.create_job(rows, self.bench, "AB")["job_id"]
+        self.store.transition(job_id, jobstore.PULLING, "AB")
+        self.store.transition(job_id, jobstore.EDITING, "AB", transfers.PULL_VERIFIED_REASON)
+        record = self.store.init_projects(job_id)
+        record["projects"][done_psx].update(state="done", removed_at="2026-09-27T21:30:00-04:00")
+        self.store.save_job(record)
+        seed_status(self.registry, done_id, "done", done_at="2026-09-27 21:25",
+                    processing_location=transfers.SHELF_PREFIX + f"{SHELF_PARENT}/MRS_T2_3D")
+        self.registry.append_notes([done_id], job_id, done_psx, 0, "check_note", "", "Explained at Confirm.", "AB",
+                                   actor="manual_edit:AB", source_id="CR-20260927-210000-AB")
+        editing_local = os.path.join(self.bench, "MRS_T3_3D")
+        os.makedirs(editing_local)
+        Path(editing_local, editing_psx).write_bytes(b"psx")
+        old = time.time() - 3600
+        os.utime(os.path.join(editing_local, editing_psx), (old, old))
+        answer = transfers.cancel_job(self.deps, self.store, job_id, "LO", cme.CANCEL_REASON, prune=True)
+        self.assertEqual(answer["job"]["phase"], "cancelled")
+        self.assertEqual(answer["rows_reset"], [editing_id])
+        self.assertEqual(self.registry.get(done_id)["manual_edit_status"], "done")
+        self.assertEqual(self.registry.get(editing_id)["manual_edit_status"], "awaiting")
+        self.assertEqual(answer["removed"], ["MRS_T3_3D"])
 
 if __name__ == "__main__":
     unittest.main()

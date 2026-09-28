@@ -633,3 +633,12 @@
   .voyager-tools .vt-review-chunks th, .voyager-tools .vt-review-chunks td { padding: 6px; }
 }
 
+/* The On cancel value of a manual edit project: one line per sentence, a
+   refusal in warning ink, and paths that wrap inside a narrow panel. */
+.voyager-tools .vt-me-lines { flex: 1 1 100%; min-width: 0; }
+.voyager-tools .vt-me-line { display: block; }
+.voyager-tools .vt-me-line + .vt-me-line { margin-top: 4px; }
+.voyager-tools .vt-me-refusal { color: var(--warning, #FFB800); }
+.voyager-tools .vt-me-project .id,
+.voyager-tools .vt-me-project .row-meta { overflow-wrap: anywhere; min-width: 0; }
+.voyager-tools .result .vt-link { color: var(--accent, #E20074); text-decoration: underline; text-underline-offset: 2px; }
