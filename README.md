@@ -1,10 +1,62 @@
 # Atlas control panel
 
-Last updated: 2026-09-27 (LO)
+Module folder `voyager_tools`. Last updated: 2026-09-29 (LO)
 
-The Atlas control panel is the one window that holds the restricted settings and tools of the atlas, the Voyager runs, the manual edit and the desktop. It is the module `voyager_tools` (section 7 of `/mnt/rip/vicarius_drive/docs/superpowers/specs/2026-09-03-voyager-program-design.md`, and program C of the manual edit chain, `/mnt/rip/vicarius_drive/docs/superpowers/specs/2026-09-26-chain-c-atlas-control-panel-design.md`); only the name people see changed, so the slug `voyager_tools`, the address `/voyager-tools`, the actor prefix `voyager_tools:` and the browser keys stay (`docs/adr/0002-atlas-control-panel-display-name-only.md`). It is a native blueprint the VICARIUS desktop mounts at `/voyager-tools` on port 5090 (`/mnt/rip/vicarius_drive/vicarius_ui_os/voyager_tools_views.py`), opened from the DEV folder item ATLAS CONTROL PANEL, which only appears in admin mode, and from the link in the atlas row view. Every route answers 401 outside admin mode and 423 while the module lock `voyager_tools` is on.
+The one window that holds the restricted settings and tools of the atlas, the Voyager runs, the manual edit and the desktop, for the admin who runs VICARIUS.
 
-## The pane list
+- Tags: 3D, TCRMP | Version: 0.5.0 | Status: active | Owner: Lauren Olinger
+- Repo: `laurenkolinger/vicarius-voyager-tools` | Related studies: none (an administrative tool, not scoped to one study)
+
+## What it does and why it exists
+
+The Atlas control panel holds every setting and tool that only an admin should reach: the order Voyager 1 processes transects in, the camera model recorded per season, the manual edit review queue with its uploads and timelines, the limits and switches that govern manual edit and Voyager runs, the space floors that the driver reads from the NAS, the parameter defaults that seed every Voyager 1 and Voyager 2 run, rewind and spot redo for retrying a transect, the tools that reclaim disk space on the Workbench and the Voyager 2 stage, and read-only panes onto the module locks, the module metadata, the desktop's appearance and the GPU right-of-way ladder.
+
+Before this module these controls lived scattered across the platform: a settings form inside the Start manual edit page, radios and tick boxes in the Admin window, a padlock on each module window's title bar, and files edited by hand on the machine (the Voyager run switches, the space floors, the GPU ladder). Nobody could see who had changed a limit, when, or why, and a hand-edited file could drift from what VICARIUS believed it held. The Atlas control panel gathers these controls into one page, program C of the manual edit chain (`/mnt/rip/vicarius_drive/docs/superpowers/specs/2026-09-26-chain-c-atlas-control-panel-design.md`, decision 9 of `/mnt/rip/vicarius_drive/docs/superpowers/specs/2026-09-26-manual-edit-chain-decisions.md`), and every setting it writes appends one line to the settings history with the old and new value, who changed it and why.
+
+Lauren Olinger, or an admin she designates, opens it to redo a failed timepoint, cancel a stuck manual edit project, free space on the Workbench, decide a transect in admin review, or change a Voyager parameter default before a run. The page grew from the Voyager program's admin tools (section 7 of `/mnt/rip/vicarius_drive/docs/superpowers/specs/2026-09-03-voyager-program-design.md`) into this broader panel; only the name people see changed on 2026-09-27, so the slug `voyager_tools`, the address `/voyager-tools`, the actor prefix `voyager_tools:` and the browser keys stay (`docs/adr/0002-atlas-control-panel-display-name-only.md`).
+
+## Where it sits in the pipeline
+
+The Atlas control panel is not a processing stage: `module.yaml` declares `type: "tool"`, `inputs: []` and `outputs: []`, and the panel mints no runs of its own. It sits beside the survey chain (`3D_phase_1 -> manual_edit -> 3D_phase2 -> tagfab`), whose manual edit step it also serves, reaching into each one through the library that already owns its data, rather than holding any of its own: the TCRMP 3D registry (`registry.py`, `processing_order.csv`, `seasons.csv`, `events.csv`) for the atlas, the camera model table and every rewind; the manual edit module's job store (`manualedit.jobstore`) for the review queue, uploads, timelines and clean manual edit run; the `voyagerparams` checkout, through `voyagertools/paramsstore.py`, for every parameter default, branch and custom run set that Voyager 1 and Voyager 2 read; and the driver's `config/nas.yaml` for the Workbench, Shelf and Voyager 2 stage paths that clean workbench and rewind before Voyager 2 walk.
+
+It is a native Flask blueprint the VICARIUS desktop (`vicarius_ui_os`, port 5090) mounts at `/voyager-tools` (`/mnt/rip/vicarius_drive/vicarius_ui_os/voyager_tools_views.py`), opened from the DEV folder item ATLAS CONTROL PANEL (admin mode only) or from the link in the atlas row view. A standalone host on port 5098 (`standalone_app.py`) serves the same blueprint alone for smoke tests away from the desktop; the platform never starts it.
+
+## Inputs
+
+`module.yaml` declares `inputs: []`: the Atlas control panel takes no run inputs of its own and processes no uploaded file. Every tool instead reads and writes live platform state directly, through the libraries named under How it works inside: the TCRMP 3D registry, the manual edit job store, the `voyagerparams` checkout and the driver's NAS configuration.
+
+## Parameters
+
+`module.yaml` declares no `parameters:` block. This is an admin tool, not a configurable pipeline stage launched with a form of its own: the values it edits (Voyager 1 and Voyager 2 parameter defaults, manual edit limits, space floors, the processing order) are the platform's own settings, set through the panes described under How it works inside.
+
+## Outputs and data-dictionary entries
+
+`module.yaml` declares `outputs: []`, and this module owns no data-dictionary descriptor. The Atlas control panel produces no catalogued dataset: every write it makes changes an existing platform record (the registry, the manual edit job store, `voyagerparams`, or a settings file) through the library that already owns that record, never a new file this module's own descriptor would need to cover.
+
+## How to run it
+
+### From the UI
+
+On the VICARIUS desktop (port 5090), click the "locked" chip beside the clock in the top bar to open the Admin window, then enter the admin PIN there and confirm; VICARIUS then shows the item ATLAS CONTROL PANEL inside the DEV folder, one of the folder icons on the desktop itself. Open the DEV folder and its ATLAS CONTROL PANEL item, or open an atlas row and follow its Control panel link. Every route answers 401 outside admin mode and 423 while the module lock `voyager_tools` is on. Pick a pane from the grouped list at the left (Records, Manual edit, Voyager, Desktop, History); each pane reads its own state when chosen, and a save asks for two to four letters of initials and, for anything destructive, a confirmation naming the consequence.
+
+### From the CLI
+
+`module.yaml` declares no `cli:` block: the Atlas control panel has no command-line entry point, and it runs only inside the desktop process on port 5090. For a smoke test away from the desktop, its blueprint can be served alone:
+
+```bash
+cd /mnt/rip/vicarius_drive/vicarius/modules/voyager_tools/github_repo
+VOYAGER_TOOLS_ADMIN_PIN=<pin> /usr/bin/python3 standalone_app.py --port 5098
+```
+
+`<pin>` is not a stored secret: whoever runs the smoke test picks any value when starting the host, then sends that same value to `POST /api/admin/unlock` (body `{"pin": "<pin>"}`) to enter admin mode for that session. Leaving `VOYAGER_TOOLS_ADMIN_PIN` unset still starts the host, but every unlock then answers 401 naming the environment variable to set.
+
+The platform never starts this standalone host on its own.
+
+## How it works inside
+
+The blueprint `voyagertools/views.py` (`voyager_tools_bp`) serves the page, the fragment and the JSON API of the eight tools; `voyagertools/manual_edit_views.py`, `timelines.py` and `review_queue.py` add the Timelines and Review queue routes and the review fragment on the same blueprint. Every route passes two gates in order, the module lock then the desktop's admin session, before it reaches `deps`, one object of plain callables (the registry, the job store, the parameter store, the NAS configuration, the chunk runner) that a test replaces with fakes; nothing under this module reaches the registry, the NAS, git or Metashape except through those callables. Two tools call an external program directly: Rewind calls Metashape, headless, through `scripts/rewind_chunk.py`, and Parameter defaults calls git through `paramsstore.run_git_subprocess`, which commits and pushes every parameter save to the `voyagerparams` checkout. Every other tool works through Python libraries that own their own files. `module.yaml` declares `runtime.gpu_required: false`: no tool of this module touches a GPU.
+
+### The pane list
 
 The list at the left is grouped, one pane at a time at the right:
 
@@ -16,7 +68,7 @@ The list at the left is grouped, one pane at a time at the right:
 | Desktop | Module locks, Module details, Appearance, Space floors, GPU ladder |
 | History | Settings history |
 
-## The settings panes
+### The settings panes
 
 The settings panes (`static/vt_settings.js`, `templates/voyager_tools/panes_settings.html`) read and write the desktop's own routes under `/api/settings` (`/mnt/rip/vicarius_drive/vicarius_ui_os/settings_views.py`), one write path per settings file, each change appended to the settings history `/mnt/rip/vicarius_drive/vicarius/_METADATA/settings_history.csv` with who, when, the old and new value and the reason. A pane shows its fields as rows, the time and initials of the last save, a drift line with **Record as found** when the file changed outside the write path, one Reason row, and one save button that is enabled only when a value differs; a save posts only the changed settings with the save time the pane read, so two people saving the same file see the second refused.
 
@@ -30,13 +82,13 @@ The settings panes (`static/vt_settings.js`, `templates/voyager_tools/panes_sett
 
 On the standalone host, which serves no `/api/settings` routes, a settings pane says the settings are served by the desktop.
 
-## Review queue, Uploads and Timelines
+### Review queue, Uploads and Timelines
 
 - **Review queue** (`static/vt_review.js`, `voyagertools/review_queue.py`, `voyagertools/manual_edit_views.py`): every transect in admin review across the unfinished manual edit projects (a transect whose atlas status reads review, with its edit round, editor, confirmation time and failed and warned checks; the editor is named in the same order as the review content, `timelines.editor_of`, and a row naming nobody reads no editor on record), every start over that stopped with the stage and the reason, every transect marked for upload that no upload set holds yet, and one line per atlas row in review that no project holds. Review on a row opens that transect's review content under the list, signed with the panel's initials, which the panel and the review keep for the browser session only (session storage), so the next person at the machine never finds the last reviewer's initials filled in. The review content is one fragment (`GET /voyager-tools/fragment?tool=review&job=&psx=`, `templates/voyager_tools/review.html`, mounted by `VoyagerTools.mountReview`) that the atlas's admin review sidecar mounts too: the manual edit module's review record of the transect (the editor, which is the certifier, else the last person the open route recorded, else "no editor on record", never the project's creator; checks with the editor's explanations and the limits they were judged under, scale and alignment per chunk, time in Metashape by round with the opens that have no recorded close, the admin's inspection time, time in editing and in review from the atlas status changes, the certification, the notes of the current round with earlier rounds collapsed, the bench copy), Open in Metashape, and the decision: an admin report, Mark for upload (with Start the upload now), Send back with instructions or Start over (after a confirmation naming the bench folder that moves aside and the Shelf folder the fresh copy comes from), then Record decision; Resume start over for a stopped start over, which posts the report and instructions of the first Start over again; Back to admin review for a transect marked for upload until its upload starts. The record is read again before a decision posts, so a transect that changed meanwhile posts nothing. Every decision goes through the manual edit module's own routes. State chips use the atlas matrix's stage colours from `static/vicarius_roles.css` (admin review violet, marked for upload lime, uploaded green, on the edit bench magenta; a stopped start over red), so the review reads in the colours of the matrix beside it.
 - **Uploads** (`static/vt_uploads.js`, `templates/voyager_tools/panes_manual_edit.html`): every transect marked for re-upload across the unfinished manual edit projects, each with a tick box; those an upload set holds now, with Watch; those in admin review, read only; and every upload set of the last 7 days with its state and Watch. Upload ticked checks the panel initials, reads the Shelf copy setting, asks for a confirmation naming each transect and what happens to its Shelf copy (renamed to `<folder>_voy1_archive` and kept, or replaced), and starts one upload set through the manual edit module's `POST /manual-edit/api/uploads`. The progress window is the editor's own component (`window.ManualEditUpload.mount` from the manual edit module's `static/manual_edit_upload.js`) in a dialog on the page body, so a relock that hides the panel leaves it open: the upload keeps running on the server, anyone may watch it, and Stop shows only in admin mode. On a host without the manual edit module the pane says so and offers nothing.
 - **Timelines** (`static/vt_timelines.js`, `voyagertools/timelines.py`, `voyagertools/manual_edit_views.py`): per manual edit project (created, Finish project pressed, completed, progress, transects by state, the pull while it runs) and per transect (pulled, time in editing, in Metashape with the opens that have no recorded close, in admin review, waiting for upload, uploaded, total, and the upload or checks window running now), newest first, filtered by project, state, editor (the certifier, else the last person the open route recorded, never the project's creator; blank reads no editor on record) and creation day, with Copy as CSV and a drawer holding the status history of every atlas row and every note of the transect. The status times come from the registry's status changes (the registry library's `state_intervals`, the time each status lasted, read from `events.csv`) inside the project's window, from its creation to the creation of the next project holding the same transect, and the Metashape time from the transect's open and close events (the manual edit job store's `edit_time`); the chip beside it counts the opens with no recorded close, the migrated ones included, which add no time. The total stops at the upload, or when the project is cancelled or fails, or when a later project takes the transect. An upload shows only while its set is queued or running; a set a desktop restart stranded is marked interrupted before the pane reads it, and a set file that cannot be read is named on the row with the reason.
 
-## The eight tools
+### The eight tools
 
 1. Atlas edit: the processing order table. Transect blocks of rows Voyager 1 has not started, moved up and down or dragged; Save order writes `processing_order.csv` through `registry.set_processing_order`; Lock order in (the confirm names the count and the first and last ids) and Unlock go through `lock_processing_order` and `unlock_processing_order`.
 2. Clean workbench: every Voyager 1 processing folder (`{SITE}_{T#}_3D`) under the Workbench roots, matched to its registry rows, compared to the Shelf copy by name and size (`driver.verify.local_snapshot` and `driver.remote.snapshot`), and Delete only when identical: confirmed, anchored inside the Workbench root, one processing_log row per deletion. The walk, the anchor and the delete skip every excluded root, read from the configuration at each call: every stage `driver.space.stage_roots` names except the Workbench (the Edit bench, the Voyager 2 stage, the VIGIL stage), the fallback bench `<workbench_root>/editbench`, the manual edit setting `edit_bench_default`, the bench of every unfinished manual edit project, and nas.yaml `inflight_dir`; when any of them cannot be read, the scan and the delete are refused. The Voyager 2 stage (`voyagertools/clean_voyager2_stage.py`) is listed apart: a working copy goes once every timepoint it served reads step 2 complete with a verified Shelf output location and the Shelf processing location and no turn reserves the transect; an output folder goes only when it matches its Shelf copy; a test run's copy (`test_<stamp>/`) is never offered.
@@ -47,11 +99,11 @@ On the standalone host, which serves no `/api/settings` routes, a settings pane 
 7. Parameter defaults: every version, branch and custom set of a phase in voyagerparams with the default marked, the full editor from the schema, the YAML box, Validate, Save as branch, and Save as default behind a dialog that states the significance. Every save writes one settings history line (the key `<phase>/DEFAULT` or `<phase>/branches/<slug>`, the old and new version) through `deps.record_setting`, which the desktop wires to `settings_stores.record_params_save`, then commits and pushes through `paramsstore.commit_and_push`. When the line cannot be written, `ParamsStore.discard_pending` removes the new files and restores `DEFAULT`, and nothing is committed; the standalone host keeps no settings history, so it refuses parameter saves.
 8. Camera model: a table editor over `seasons.csv` (camera model, preprocessing, notes per season) through `registry.set_season`.
 
-## Admin mode
+### Admin mode
 
 Every route in this module checks two gates in order: the module lock (`voyager_tools`; 423 while locked, the exact page "Under development. Please come back later. Email Lauren for questions." with a mailto to lauren.olinger@uvi.edu), then the desktop's admin session (401 `{"error": "locked", "need_unlock": true}` outside it; the cookie is `vicarius_session`, unlocked the same way as every other admin surface). Nobody, including the module owner, reaches a tool without both. On the desktop the page opens two ways, both behind admin mode: the DEV folder item ATLAS CONTROL PANEL (carries `admin: true` in `desktop_boot.js`, so `desktop_icons.js` hides it, and any folder window holding it, until `VICPREFS.admin` is set, and rebuilds the grid the moment admin mode is unlocked or locked again), and the link in the atlas row-view toolbar (also hidden outside admin mode). The standalone host on port 5098 (`standalone_app.py`) gates on its own PIN (`VOYAGER_TOOLS_ADMIN_PIN`) instead of the desktop session, for smoke tests; the platform never starts it.
 
-## The versioning rule (tool 7)
+### The versioning rule (tool 7)
 
 Every version, branch and custom parameter set for a phase (`voyager1` or `voyager2`) lives in the `voyagerparams` checkout (`/mnt/rip/vicarius_drive/vicarius/modules/voyagerparams/github_repo/`), read and written through `voyagertools/paramsstore.py`. Three ways a save reaches it, each with its own rule:
 
@@ -61,17 +113,17 @@ Every version, branch and custom parameter set for a phase (`voyager1` or `voyag
 
 Every save commits and, when the checkout has a remote, pushes to `laurenkolinger/voyagerparams` (public) through `paramsstore.commit_and_push`; a push failure is reported rather than raised, so a save is never lost to a flaky connection. The full parameter editor is generated from `voyagertools/params_schema_voyager1.yaml` and `voyagertools/params_schema_voyager2.yaml` (label, tooltip, type, default, and range or choices per key; `processing.max_chunks_per_psx` is marked hidden because the project structure controls it, not the operator), so a schema change is the only place a new key's tooltip needs to be written. The Voyager 2 schema holds exactly the keys module 3D_phase2 reads (its `config/voyager2_defaults.yaml`; a test keeps the two equal). The editor shows only the keys the loaded file holds, so a save never invents a value: the legacy voyagerparams `voyager2` v0.1.0 draft holds none of them and is edited through the YAML box.
 
-## Layout
+### Layout
 
 - `voyagertools/views.py`: the blueprint `voyager_tools_bp` (page `/voyager-tools`, fragment `/voyager-tools/fragment`, JSON under `/voyager-tools/api/`), the two gates, and `deps`, one object of plain callables (registry, job store, parameter store, snapshots, rmtree, processing log, chunk runner, the stage layout of the Workbench walk, the Shelf rename, site names, prompts doc) that tests replace with fakes.
 - `voyagertools/manual_edit_views.py`, `voyagertools/timelines.py` and `voyagertools/review_queue.py`: the Timelines and Review queue routes and the review fragment on the same blueprint, and the figures behind them; the only write is the manual edit module's own recovery of stranded upload sets and start overs.
 - `voyagertools/order_tool.py`, `clean_workbench.py`, `clean_voyager2_stage.py`, `clean_manual_edit.py`, `rewind.py`, `rewind_voyager2.py`, `camera_tool.py`: the tool logic, pure where it can be, with the registry library, `manualedit.jobstore` and `paramsstore` doing every write.
 - `scripts/rewind_chunk.py`: the Metashape script (`metashape -r scripts/rewind_chunk.py <psx> --label <id> --out <json>`; `--fake` for tests).
 - `templates/voyager_tools/panel.html` (the fragment, root `<section class="voyager-tools">`, including `panes_manual_edit.html` and `panes_settings.html`) and `index.html` (the standalone page); `static/voyager_tools.css` (scoped under `.voyager-tools`); `static/voyager_tools.js` (an IIFE extending `window.VoyagerTools` with `mount(el, opts)`, `mountPanel(el, {onClose, pane})` for the atlas, and `registerPane(key, init)`, the seam every later pane script uses); `static/vt_settings.js` (the settings, desktop and history panes); `static/vt_uploads.js` and `static/vt_timelines.js` (the Uploads and Timelines panes); `static/vt_review.js` (the Review queue pane and `VoyagerTools.mountReview`) with `templates/voyager_tools/review.html` (the review fragment, root `<section class="voyager-tools vt-review">`).
-- `standalone_app.py`: a smoke-test host on port 5098 (`VOYAGER_TOOLS_ADMIN_PIN=... python3 standalone_app.py --port 5098`); the platform never starts it.
-- `voyagertools/paramsstore.py`, `params_schema_voyager1.yaml` and `params_schema_voyager2.yaml`: the voyagerparams reader and writer and the two editor schemas (plan task A7; program D milestone D1f for Voyager 2).
+- `standalone_app.py`: a smoke-test host on port 5098 (`VOYAGER_TOOLS_ADMIN_PIN=... /usr/bin/python3 standalone_app.py --port 5098`); the platform never starts it.
+- `voyagertools/paramsstore.py`, `params_schema_voyager1.yaml` and `params_schema_voyager2.yaml`: the voyagerparams reader and writer and the two editor schemas.
 
-## API in one table
+### API in one table
 
 | Route | Body | Answer |
 |---|---|---|
@@ -93,21 +145,41 @@ Every save commits and, when the checkout has a remote, pushes to `laurenkolinge
 
 Every write needs `initials` (two to four letters, the registry's rule) and every destructive one `confirm: true`, which the page sends after its dialog. A refusal is one sentence under `error` with status 400, 404 or 409.
 
-## Tests
+## Gotchas and troubleshooting
+
+- The plain `python3` on this machine's PATH resolves to an unrelated project's virtual environment, not the system interpreter. Use `/usr/bin/python3` for every command in this manual.
+- The standalone host (port 5098) keeps no settings history, so it refuses every parameter save with one sentence naming the desktop as the place to save from (`PARAMS_HISTORY_ONLY_ON_DESKTOP`).
+- A parameter save whose settings-history line cannot be written is undone automatically (`ParamsStore.discard_pending` removes the new files and restores `DEFAULT`), so a failed save leaves the `voyagerparams` checkout unchanged.
+- A push failure from `paramsstore.commit_and_push` is reported in the response rather than raised, so a save is never lost to a flaky connection; check the `git` field of the response for `committed` and `pushed`.
+- Clean workbench and rewind before Voyager 2 refuse to run at all when a stage path cannot be read from the driver's `config/nas.yaml`, rather than scanning or deleting with an incomplete exclusion list. Check the driver's NAS configuration first when either tool answers 500.
+- Two admins saving the same settings file at once: the second save is refused rather than silently overwriting the first, because a save posts only the changed fields together with the read time the pane started from.
+
+## Resume from cold
+
+This module needs Python 3.10 or newer (`module.yaml` `runtime.python_version: ">=3.10"`), the one dependency `requirements.txt` lists, `pyyaml>=6.0`, and Flask, which the blueprint (`voyagertools/views.py`), the standalone host (`standalone_app.py`) and the test suite all import but `requirements.txt` does not list; the desktop's own virtual environment at `/mnt/rip/vicarius_drive/vicarius_ui_os/.venv` already carries both. It keeps no run folder of its own: `module.yaml` declares `type: "tool"`, and the panel mints no `inprocess/run_*/` directory, because every tool acts directly on a platform record that already logs itself (the registry's `events.csv`, the manual edit job's own log, `settings_history.csv`, or the `voyagerparams` checkout's own git history).
+
+Every write lives where the library that owns it puts it: the TCRMP 3D registry at `/mnt/rip/vicarius_drive/vicarius/_METADATA/3d/`, the manual edit job store under that same registry root, at `/mnt/rip/vicarius_drive/vicarius/_METADATA/3d/manual_edit/` (jobs, uploads, log, settings and the current pointer), the `voyagerparams` checkout at `/mnt/rip/vicarius_drive/vicarius/modules/voyagerparams/github_repo/`, and every settings file this module edits, named under The settings panes above. Nothing under this module's own clone is a data output; the clone holds code, templates, static assets and tests only.
+
+### Tests
+
+This clone carries no virtual environment of its own, so the first two commands below run the system interpreter `/usr/bin/python3` directly, the same interpreter the Gotchas section names. That system interpreter carries PyYAML through the Debian package `python3-yaml`, but not Flask: on this machine `/usr/bin/python3` finds Flask only because a user site-packages install from another project already provides it at `/home/bizon/.local/lib/python3.12/site-packages/flask`. A machine without that install needs `pip install flask` before these commands run:
 
 ```bash
 cd /mnt/rip/vicarius_drive/vicarius/modules/voyager_tools/github_repo
-python3 -m unittest discover -s tests -q        # 461 tests on 2026-09-27
-python3 tests/test_house_rules.py
+/usr/bin/python3 -m unittest discover -s tests -q        # 639 tests on 2026-09-29
+/usr/bin/python3 tests/test_house_rules.py
 cd /mnt/rip/vicarius_drive/vicarius_ui_os && .venv/bin/python -m pytest tests/test_voyager_tools_host.py -q
 ```
 
 No test touches the live registry (every test sets `VICARIUS_3D_REGISTRY_ROOT` to a temporary root and reloads the library), the NAS, git, Metashape or a live process; the chunk script runs in `--fake` mode and the parameter store takes a fake git runner.
 
-## Related documentation
+To confirm the module answers on a running desktop: `curl -s localhost:5090/api/modules | grep voyager_tools` finds it, and `curl -s -o /dev/null -w '%{http_code}' localhost:5090/modules/voyager_tools` prints 302, because the desktop redirects this native pane's module page straight to `/voyager-tools`; following the redirect (`curl -sL`) answers 401 outside admin mode. Signed in as admin, opening the Atlas control panel and picking a pane, for example Atlas edit, should show the processing order within a second or two.
+
+## Provenance and links
 
 - Rules for agents: `/mnt/rip/vicarius_drive/CLAUDE.md`; this clone's pointer is `CLAUDE.md` beside this file; the glossary is `CONTEXT.md`.
 - The program spec and plan: `/mnt/rip/vicarius_drive/docs/superpowers/specs/2026-09-03-voyager-program-design.md`, `/mnt/rip/vicarius_drive/docs/superpowers/plans/2026-09-03-voyager-program-build.md`.
 - voyagerparams README (the versioning rule in plain words): `/mnt/rip/vicarius_drive/vicarius/modules/voyagerparams/github_repo/README.md`.
 - The registry library and its glossary: `/mnt/rip/vicarius_drive/vicarius/_METADATA/3d/registry.py`, `/mnt/rip/vicarius_drive/vicarius/_METADATA/3d/CONTEXT.md`.
 - The manual edit job store: `/mnt/rip/vicarius_drive/vicarius/modules/manual_edit/github_repo/manualedit/jobstore.py`.
+- This module owns no data-dictionary descriptor.
