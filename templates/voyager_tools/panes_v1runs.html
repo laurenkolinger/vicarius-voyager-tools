@@ -1,6 +1,6 @@
 {#
   File:    templates/voyager_tools/panes_v1runs.html
-  Purpose: The Voyager 1 runs pane of the Atlas control panel, included by
+  Purpose: The Voyager 1 batch pane of the Atlas control panel, included by
            panel.html inside <div class="vt-panes">: the running batch (id,
            status, Shelf folder, time limit), one row per turn with Flush for
            a turn that hung or was cut off and Move for a pending turn, the
@@ -9,15 +9,15 @@
            the driver does the work. Var-free, like the other pane files.
 #}
 
-      {# Voyager 1 runs: flush, move, batch Shelf #}
+      {# Voyager 1 batch: flush, move, batch Shelf #}
       <section class="vt-pane" id="vt-v1runs" role="tabpanel" data-vt-pane="v1runs" aria-labelledby="vt-v1runs-h" hidden>
         <div class="pane-head">
-          <h2 id="vt-v1runs-h">Voyager 1 runs</h2>
-          <button type="button" class="tip" aria-label="About Voyager 1 runs" title="A batch is the list of transects the driver builds one after another; a turn is one transect with its videos. A flush ends a turn's build, gives its videos back to the Archive, deletes its Workbench folder and, if you choose, puts the turn at the end of the queue. The driver does the work and records who asked."><span>i</span></button>
+          <h2 id="vt-v1runs-h">Voyager 1 batch</h2>
+          <button type="button" class="tip" aria-label="About the Voyager 1 batch" title="A batch is the list of transects the driver builds one after another, and a turn is one transect with its videos. A flush ends a turn's build, returns its videos to the Archive and deletes its Workbench folder; the driver does the work and records who asked."><span>i</span></button>
         </div>
         <p class="vt-line vt-v1-batch" data-vt="v1-batch"></p>
         <p class="count vt-line" data-vt="v1-limit"></p>
-        <div class="vt-table-wrap vt-keep">
+        <div class="vt-table-wrap vt-keep vt-v1-tablebox" data-vt="v1-table-box" hidden>
           <table class="vt-table vt-v1-table" data-vt="v1-table">
             <thead>
               <tr>
@@ -63,11 +63,11 @@
           </dl>
           <div class="actions">
             <button type="button" class="btn btn-danger" data-vt="v1-flush-go" title="Flush this transect after a last confirmation. The driver ends its build, returns its videos to the Archive and deletes its Workbench folder; this cannot be undone." disabled>Flush this transect</button>
-            <button type="button" class="btn" data-vt="v1-flush-cancel" title="Close the preview without flushing. Nothing changes.">Cancel</button>
+            <button type="button" class="btn" data-vt="v1-flush-cancel">Cancel</button>
           </div>
         </section>
 
-        <fieldset class="vt-fieldset vt-v1-shelf">
+        <fieldset class="vt-fieldset vt-v1-shelf" data-vt="v1-shelf-box" hidden>
           <legend>Shelf folder of this batch <button type="button" class="tip" aria-label="About the batch Shelf" title="The Shelf is the NAS folder each finished transect is deposited into. A change applies to the turns of this batch not yet deposited, and the driver refuses it while a deposit is in progress."><span>i</span></button></legend>
           <dl class="choices">
             <div>
@@ -87,7 +87,7 @@
             </div>
           </dl>
           <div class="actions">
-            <button type="button" class="btn btn-primary" data-vt="v1-shelf-go" title="Change the Shelf folder after a confirmation. The driver checks the folder and records the change; transects already deposited stay where they are.">Change the Shelf</button>
+            <button type="button" class="btn" data-vt="v1-shelf-go" title="Change the Shelf folder after a confirmation. The driver checks the folder and records the change; transects already deposited stay where they are.">Change the Shelf</button>
           </div>
         </fieldset>
         <p class="result" data-vt="v1-result" role="status"></p>

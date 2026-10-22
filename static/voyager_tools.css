@@ -643,7 +643,7 @@
 .voyager-tools .vt-me-project .row-meta { overflow-wrap: anywhere; min-width: 0; }
 .voyager-tools .result .vt-link { color: var(--accent, #E20074); text-decoration: underline; text-underline-offset: 2px; }
 
-/* -- the Voyager 1 runs pane ----------------------------------------------- */
+/* -- the Voyager 1 batch pane ----------------------------------------------- */
 .voyager-tools .vt-v1-batch { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .voyager-tools .vt-v1-shelf-line { font-size: 13px; color: var(--text-dim, #b0a7ab); }
 .voyager-tools .vt-v1-table td { white-space: normal; }
@@ -654,10 +654,12 @@
 .voyager-tools .vt-v1-videos { display: flex; flex-wrap: wrap; gap: 2px 6px; margin-top: 4px; }
 .voyager-tools .vt-v1-video { font-size: 11px; color: var(--text-dim, #b0a7ab); }
 .voyager-tools .vt-v1-flag { display: block; margin-top: 4px; }
-.voyager-tools .vt-v1-note { display: block; margin-top: 2px; font-size: 12px; overflow-wrap: anywhere; }
+.voyager-tools .vt-v1-note-row td { padding-top: 0; font-size: 12px; overflow-wrap: anywhere; border-top: 0; }
+.voyager-tools .vt-v1-tablebox[hidden], .voyager-tools .vt-v1-shelf[hidden] { display: none; }
+.voyager-tools .vt-plan p.count.is-warn { color: var(--warning, #FFB800); }
 .voyager-tools .vt-v1-hours { display: block; margin-top: 4px; font-size: 12px; color: var(--text-dim, #b0a7ab); }
 .voyager-tools .vt-v1-hours.is-over { color: var(--error, #FF4D6D); }
-.voyager-tools .vt-v1-actions { white-space: normal; }
+.voyager-tools .vt-v1-table td.vt-v1-actions { white-space: nowrap; }
 .voyager-tools .vt-v1-actions .btn { margin: 0 4px 4px 0; }
 .voyager-tools .vt-v1-flush { margin-top: 16px; }
 .voyager-tools .vt-v1-sub { margin: 0 0 8px; font: 700 14px/1.3 var(--font-display, 'Syne', sans-serif); }

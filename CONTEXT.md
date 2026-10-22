@@ -18,7 +18,7 @@ _Avoid_: tab, panel (the panel is the whole window)
 One of the eight panes that act on the registry or the disks: Atlas edit, Clean workbench, Clean manual edit run, Rewind, Spot redo, Prompts doc, Parameter defaults, Camera model. Every tool reads through the library that owns its file and writes with the actor `voyager_tools:<INITIALS>`.
 
 **Settings pane**:
-A pane that edits one settings file through the desktop's write path for it (`/api/settings/<store>`): Manual edit settings, Shelf copy, Voyager runs, Space floors. Every save appends one settings history line per changed setting.
+A pane that edits one settings file through the desktop's write path for it (`/api/settings/<store>`): Manual edit settings, Shelf copy, Voyager run settings, Driver settings. Every save appends one settings history line per changed setting.
 
 **Settings history**:
 `/mnt/rip/vicarius_drive/vicarius/_METADATA/settings_history.csv`, one line per changed setting: when, who, which store and key, the old and new value as JSON text, and the reason. Written only by the desktop, never rewritten.
@@ -43,14 +43,14 @@ _Avoid_: mismatch, stale
 The desktop session state (the ADMIN chip on port 5090, `session["admin_unlocked"]`) that every route of this module requires; outside it a route answers 401 and the desktop hides the item. Distinct from the module lock, which blocks everyone including admin.
 _Avoid_: dev mode
 
-## Voyager 1 runs
+## Voyager 1 batch
 
 **Batch**:
 The driver's list of transects Voyager 1 builds one after another, with one Shelf folder. The pane reads it from the driver's status and never writes it.
 _Avoid_: queue (the queue is the pending turns of a batch), job
 
 **Turn**:
-One transect of a batch with its four videos, numbered in the order the batch was made. Its status is pending, running, paused, error, stopped, done, scrapped or flushed.
+One transect of a batch with its four videos, numbered in the order the batch was made. Its status is the driver's turn status: pending, running, paused, releasing, done, released, scrapped or flushed (`TURN_*` in the driver's `driver/state.py`); error and stopped are statuses of the batch, not of a turn.
 _Avoid_: run, task
 
 **Flush**:

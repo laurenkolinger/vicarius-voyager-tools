@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Module: tests/test_v1runs.py
-Purpose: Tests of voyagertools.v1runs, the pure model of the Voyager 1 runs
+Purpose: Tests of voyagertools.v1runs, the pure model of the Voyager 1 batch
          pane: the batch line, each flag (over the limit, build process gone,
          flushed), each action rule (Flush, Move), the pending positions the
          Move controls use, missing keys, a status with no batch, a batch of

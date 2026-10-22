@@ -66,14 +66,14 @@ URL_PREFIX = "/voyager-tools"
 MODULE_SLUG = "voyager_tools"
 DISPLAY_NAME = "Atlas control panel"
 UI_STYLE = "voyager_tools"
-ASSET_VERSION = "20261021a"
+ASSET_VERSION = "20261021c"
 ROOT_SECTION_PREFIX = '<section class="voyager-tools"'
 STATIC_JS = "voyager_tools.js"
 STATIC_SETTINGS_JS = "vt_settings.js"  # the settings and desktop panes (program C spec 5.3)
 STATIC_UPLOADS_JS = "vt_uploads.js"  # the Uploads pane (milestone C7)
 STATIC_TIMELINES_JS = "vt_timelines.js"  # the Timelines pane (milestone C8)
 STATIC_REVIEW_JS = "vt_review.js"  # the Review queue pane and VoyagerTools.mountReview (milestone C6)
-STATIC_V1RUNS_JS = "vt_v1runs.js"  # the Voyager 1 runs pane (flush, move, batch Shelf)
+STATIC_V1RUNS_JS = "vt_v1runs.js"  # the Voyager 1 batch pane (flush, move, batch Shelf)
 STATIC_CSS = "voyager_tools.css"
 # Load order: the pane seam first, then one script per group of panes.
 PANEL_SCRIPTS = (STATIC_JS, STATIC_SETTINGS_JS, STATIC_UPLOADS_JS, STATIC_TIMELINES_JS, STATIC_REVIEW_JS,
@@ -1575,7 +1575,7 @@ def api_seasons_save():
     return jsonify({"ok": True, "changed": changed, "season": line, "label": camera_tool.season_label(key)})
 
 
-# --- the Voyager 1 runs pane: flush, move, batch Shelf (through the driver's API) ----------------------
+# --- the Voyager 1 batch pane: flush, move, batch Shelf (through the driver's API) ----------------------
 
 LOG_V1RUNS = "voyager tools: %s %s by %s: %s"
 
@@ -1596,11 +1596,16 @@ def _driver_call(method: str, *args):
         raise RequestError(exc.reason, exc.http_status)
 
 
+# A turn number is at most six ASCII digits; anything longer is not a turn of any batch.
+TURN_DIGITS = r"[0-9]{1,6}"
+MAX_TURN_NUMBER = 999999
+
+
 def _turn_number(value) -> int:
-    """A turn number of 1 or more from a body or query value (a whole number or its digits)."""
-    if isinstance(value, str) and value.strip().isdigit():
+    """A turn number of 1 to 999999 from a body or query value (a whole number or up to six ASCII digits)."""
+    if isinstance(value, str) and re.fullmatch(TURN_DIGITS, value.strip()):
         value = int(value.strip())
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MAX_TURN_NUMBER:
         raise RequestError("turn must be a whole number of 1 or more.")
     return value
 

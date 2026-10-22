@@ -2,7 +2,7 @@
 """
 Module: voyagertools/v1runs.py
 Purpose: Turns the driver's GET /api/status answer into the model of the
-         Voyager 1 runs pane: the batch line and one row per turn, with the
+         Voyager 1 batch pane: the batch line and one row per turn, with the
          transect and its full site name, the four videos, the status, the
          video being built and its hours against the time limit, the flags
          (over the limit, build process gone, flushed) and the actions that
@@ -210,7 +210,7 @@ def _batch_line(status: Mapping, batch: Mapping, rows: list[dict]) -> dict:
 
 
 def build_model(status, site_name: Callable[[str], str]) -> dict:
-    """The model of the Voyager 1 runs pane from the driver status.
+    """The model of the Voyager 1 batch pane from the driver status.
 
     Parameters:
         status: the dict GET /api/status answered; anything else gives the no-batch model.

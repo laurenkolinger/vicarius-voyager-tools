@@ -34,6 +34,9 @@ LANE = "voyager1"
 STATUS_TIMEOUT_S = 20
 PREVIEW_TIMEOUT_S = 120
 WRITE_TIMEOUT_S = 600
+# A flush waits up to 30 s of grace and 30 s for the build to go, then deletes a Workbench folder of several
+# hundred GB; it can take minutes, so it has its own limit.
+FLUSH_TIMEOUT_S = 900
 MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 MAX_REASON_CHARS = 2000
 MAX_PATH_CHARS = 1024
@@ -83,6 +86,13 @@ def _port_words(base: str) -> str:
     """The words naming the driver in a sentence: "The driver on port 5093"."""
     port = urllib.parse.urlsplit(base).port
     return f"The driver on port {port}" if port else "The driver"
+
+
+def _os_reason(reason) -> str:
+    """The words for a failed connection: the operating system's strerror for an OSError, else the text of the reason."""
+    if isinstance(reason, OSError) and reason.strerror:
+        return str(reason.strerror)
+    return str(reason)
 
 
 def _sentence(text: str) -> str:
@@ -178,7 +188,7 @@ class DriverClient:
             if isinstance(reason, (socket.timeout, TimeoutError)) or isinstance(exc, (socket.timeout, TimeoutError)):
                 why = f"no answer within {int(timeout)} seconds"
             else:
-                why = str(reason) or exc.__class__.__name__
+                why = _os_reason(reason) or exc.__class__.__name__
             raise DriverError(f"{who} did not answer: {why.rstrip('.')}.", unreachable=True) from exc
         return self._parse(raw, who)
 
@@ -236,7 +246,7 @@ class DriverClient:
         body = {"turn_id": _positive_int(turn_id, "turn_id"), "initials": _text(initials, "initials", 4),
                 "reason": _text(reason, "reason", MAX_REASON_CHARS), "requeue": _flag(requeue, "requeue"),
                 "resume": _flag(resume, "resume")}
-        return self._request("POST", "/api/flush", body=body, timeout=WRITE_TIMEOUT_S)
+        return self._request("POST", "/api/flush", body=body, timeout=FLUSH_TIMEOUT_S)
 
     def move_turn(self, turn_id: int, to) -> dict:
         """POST /api/turns/<id>/move: reorder a pending turn.

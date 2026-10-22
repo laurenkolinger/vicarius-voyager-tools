@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Module: tests/test_v1runs_routes.py
-Purpose: Route tests of the Voyager 1 runs pane (GET /api/v1runs, GET
+Purpose: Route tests of the Voyager 1 batch pane (GET /api/v1runs, GET
          /api/v1runs/flush-preview, POST /api/v1runs/flush, /move and
          /shelf) with the driver client faked: the admin and lock gates,
          the model the pane receives, the exact call each POST makes on the
@@ -149,6 +149,26 @@ class Reads(RouteCase):
         self.assertEqual(r.get_json(), {"turn_id": 6, "can_flush": True, "folder_bytes": 5})
         self.assertEqual(self.fake.calls, [("flush_preview", 6)])
 
+    def test_a_turn_is_up_to_six_ascii_digits_and_nothing_else_is_a_500(self):
+        hostile = ["\u00b2", "\u0663", "9" * 5000, "-1", "1.5", "1e3", "", "   ", "1234567", "0", "\u0661\u0662", "\n", "+5"]
+        for value in hostile:
+            with self.subTest(turn=value[:12]):
+                r = self.client.get("/voyager-tools/api/v1runs/flush-preview", query_string={"turn": value})
+                self.assertEqual(r.status_code, 400)
+                self.assertEqual(r.get_json()["error"], "turn must be a whole number of 1 or more.")
+                body = dict(Flush.BODY, turn_id=value)
+                r = self.client.post("/voyager-tools/api/v1runs/flush", json=body)
+                self.assertEqual(r.status_code, 400)
+        huge = '{"turn_id": 1' + "0" * 5000 + ', "initials": "LO", "reason": "r", "confirm": true}'
+        r = self.client.post("/voyager-tools/api/v1runs/flush", data=huge, content_type="application/json")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(self.fake.calls, [])
+
+    def test_a_turn_given_as_digits_still_works(self):
+        self.fake.answers["flush_preview"] = {"can_flush": True}
+        for value in ("6", " 6 ", "000006", "999999"):
+            self.assertEqual(self.client.get("/voyager-tools/api/v1runs/flush-preview", query_string={"turn": value}).status_code, 200)
+
     def test_preview_refuses_a_bad_turn(self):
         for query in ("", "?turn=", "?turn=0", "?turn=-1", "?turn=abc", "?turn=1.5", "?turn=%3Cscript%3E"):
             with self.subTest(query=query):
@@ -272,9 +292,9 @@ class MoveAndShelf(RouteCase):
              "confirm": True}
 
     def test_shelf_change_calls_the_driver(self):
-        self.fake.answers["set_batch_shelf"] = {"shelf_root": self.SHELF["shelf_root"], "applies_to_turns": 3}
+        self.fake.answers["set_batch_shelf"] = {"shelf_root": self.SHELF["shelf_root"], "applies_to_turns": [7, 8, 9]}
         r = self.post("/shelf", self.SHELF)
-        self.assertEqual((r.status_code, r.get_json()["applies_to_turns"]), (200, 3))
+        self.assertEqual((r.status_code, r.get_json()["applies_to_turns"]), (200, [7, 8, 9]))
         self.assertEqual(self.fake.calls, [("set_batch_shelf", self.SHELF["shelf_root"], "LO", "Archive8 is 96% full")])
 
     def test_shelf_refusals_never_reach_the_driver(self):

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Module: tests/test_v1runs_pins.py
-Purpose: Pins the Voyager 1 runs pane (static/vt_v1runs.js and
+Purpose: Pins the Voyager 1 batch pane (static/vt_v1runs.js and
          templates/voyager_tools/panes_v1runs.html): the pure helpers under
          node (escaping of hostile text, the initials seed of the page
          address parameter then the remembered value and never a default,
@@ -149,7 +149,48 @@ class Helpers(unittest.TestCase):
     def test_flushed_row_names_who_when_and_why(self):
         out = run_node("return h.rowHtml(" + json.dumps(row(status="flushed", actions={"flush": False, "move": False},
               flushed={"by": "LO", "at": "2026-10-21 19:02 AST", "reason": "hung", "requeued_as": 10})) + ");")
-        self.assertIn("Flushed by LO, 2026-10-21 19:02 AST. hung Put back as turn 10.", out)
+        self.assertIn("Flushed by LO, 2026-10-21 19:02 AST. hung. Put back as turn 10.", out)
+
+    def test_a_reason_without_a_full_stop_gets_one_before_the_put_back_sentence(self):
+        flushed = lambda reason: {"by": "LO", "at": "t", "reason": reason, "requeued_as": 10}
+        for reason, expected in (("hung", "hung. Put back"), ("hung.", "hung. Put back"), ("hung?", "hung? Put back"),
+                                 ("  hung  ", "hung. Put back")):
+            with self.subTest(reason=reason):
+                line = run_node("return h.flushedLine(" + json.dumps(flushed(reason)) + ");")
+                self.assertIn(expected, line)
+                self.assertNotIn("..", line)
+        self.assertEqual(run_node("return h.flushedLine(null);"), "")
+
+    def test_the_flushed_note_is_its_own_row_under_the_turn(self):
+        out = run_node("return h.rowHtml(" + json.dumps(row(status="flushed", actions={"flush": False, "move": False},
+              flushed={"by": "LO", "at": "2026-10-21 19:02 AST", "reason": "hung"})) + ");")
+        self.assertEqual(out.count("<tr"), 2)
+        self.assertIn('class="vt-v1-note-row"', out)
+        self.assertIn('colspan="4"', out)
+        plain = run_node("return h.rowHtml(" + json.dumps(row()) + ");")
+        self.assertEqual(plain.count("<tr"), 1)
+
+    def test_the_shelf_sentence_lists_the_turns(self):
+        cases = [
+            ({"shelf_root": "/volume5/x", "applies_to_turns": [7, 8, 9]}, "The Shelf is now /volume5/x for turns 7, 8 and 9."),
+            ({"shelf_root": "/volume5/x", "applies_to_turns": [7, 8]}, "The Shelf is now /volume5/x for turns 7 and 8."),
+            ({"shelf_root": "/volume5/x", "applies_to_turns": [7]}, "The Shelf is now /volume5/x for turn 7."),
+            ({"shelf_root": "/volume5/x", "applies_to_turns": []}, "The Shelf is now /volume5/x for no turn yet; new turns use it."),
+            ({"shelf_root": "/volume5/x"}, "The Shelf is now /volume5/x for no turn yet; new turns use it."),
+            ({"shelf_root": "/volume5/x", "applies_to_turns": 3}, "The Shelf is now /volume5/x for no turn yet; new turns use it."),
+            (None, "The Shelf is now not reported for no turn yet; new turns use it."),
+        ]
+        for answer, expected in cases:
+            with self.subTest(answer=answer):
+                self.assertEqual(run_node("return h.shelfWords(" + json.dumps(answer) + ");"), expected)
+
+    def test_a_flush_call_that_got_no_answer_reports_what_the_driver_shows(self):
+        model = {"turns": [{"id": 6, "status": "flushed"}, {"id": 7, "status": "running"}]}
+        said = lambda turn, m: run_node("return h.timeoutLine(" + json.dumps(turn) + ", " + json.dumps(m) + ");")
+        self.assertIn("shows turn 6 as flushed.", said(6, model))
+        self.assertIn("shows turn 7 as running; the flush may still be running", said(7, model))
+        self.assertIn("no longer lists the turn", said(9, model))
+        self.assertIn("no longer lists the turn", said(6, None))
 
     def test_the_limit_line_is_a_line_not_a_button(self):
         self.assertEqual(run_node("return h.limitLine({time_limit_hours: 11});"), "Videos over 11 hours are flushed automatically.")
@@ -179,6 +220,17 @@ class Helpers(unittest.TestCase):
         self.assertIn("0 videos", text)
         refused = run_node("return h.previewItems({can_flush: false, refusal: 'a deposit has started'});")
         self.assertEqual(refused[0], {"kind": "refusal", "text": "a deposit has started"})
+
+    def test_a_refusal_with_no_rows_shows_only_the_refusal_sentence(self):
+        for preview in ("{can_flush: false, allowed: false, refusal: 'Turn 99 is not in batch b.'}",
+                        "{can_flush: false, refusal: 'Turn 99 is not in batch b.', rows: []}"):
+            with self.subTest(preview=preview):
+                items = run_node("return h.previewItems(" + preview + ");")
+                self.assertEqual(items, [{"kind": "refusal", "text": "Turn 99 is not in batch b."}])
+        refused_with_rows = run_node("return h.previewItems({can_flush: false, refusal: 'r', rows: [{id: 'A'}]});")
+        self.assertGreater(len(refused_with_rows), 1)
+        html_out = run_node("return h.previewHtml(h.previewItems({can_flush: false, refusal: 'r'}));")
+        self.assertEqual(html_out.count("<p"), 1)
 
     def test_preview_survives_garbage(self):
         for garbage in ("null", "5", "'x'", "[]", "{rows: 'x', live: 3, completed_ids: {}}", "{rows: [null, 5]}"):
@@ -275,6 +327,78 @@ class StaticGuards(unittest.TestCase):
         self.assertIn("initialsSeed(window.location.search", self.js)
         self.assertIn("box.value = box.value.toUpperCase()", self.js)
         self.assertNotRegex(self.js, r"value\s*=\s*['\"]LO['\"]")
+
+    def test_warning_lines_of_the_preview_have_the_warning_colour(self):
+        css = (CLONE / "static" / "voyager_tools.css").read_text(encoding="utf-8")
+        self.assertRegex(css, r"\.voyager-tools \.vt-plan p\.count\.is-warn\s*\{[^}]*color:\s*var\(--warning")
+
+    def test_readme_keeps_the_review_queue_heading_after_the_new_section(self):
+        readme = (CLONE / "README.md").read_text(encoding="utf-8")
+        self.assertIn("### Review queue, Uploads and Timelines", readme)
+        self.assertLess(readme.index("### Voyager 1 batch"), readme.index("### Review queue, Uploads and Timelines"))
+        self.assertLess(readme.index("### Review queue, Uploads and Timelines"), readme.index("- **Review queue**"))
+
+    def test_section_tooltip_has_at_most_two_sentences_and_cancel_has_none(self):
+        section = re.search(r'aria-label="About the Voyager 1 batch" title="([^"]+)"', self.tpl).group(1)
+        self.assertLessEqual(len([s for s in re.split(r"(?<=[.!?])\s+", html.unescape(section)) if s]), 2)
+        cancel = re.search(r'<button[^>]*data-vt="v1-flush-cancel"[^>]*>', self.tpl).group(0)
+        self.assertNotIn("title=", cancel)
+
+    def test_the_tabs_carry_the_new_names_and_no_old_label_remains(self):
+        panel = PANEL.read_text(encoding="utf-8")
+        self.assertRegex(panel, r'data-vt-tab="v1runs"[^>]*>Voyager 1 batch</button>')
+        self.assertRegex(panel, r'data-vt-tab="runs"[^>]*>Voyager run settings</button>')
+        self.assertRegex(panel, r'data-vt-tab="floors"[^>]*>Driver settings</button>')
+        settings = (CLONE / "templates" / "voyager_tools" / "panes_settings.html").read_text(encoding="utf-8")
+        self.assertIn('<h2 id="vt-runs-h">Voyager run settings</h2>', settings)
+        self.assertIn('<h2 id="vt-floors-h">Driver settings</h2>', settings)
+        self.assertIn("Voyager 1 batch</h2>", self.tpl)
+        stale = [">Voyager runs<", ">Voyager 1 runs<", ">Space floors<", '"Voyager runs"', '"Space floors"', "### Voyager 1 runs"]
+        scanned = [panel, settings, self.tpl, self.js, (CLONE / "static" / "vt_settings.js").read_text(encoding="utf-8"),
+                   (CLONE / "README.md").read_text(encoding="utf-8"), (CLONE / "CONTEXT.md").read_text(encoding="utf-8")]
+        for text in scanned:
+            for label in stale:
+                self.assertNotIn(label, text)
+        self.assertNotIn("**Voyager runs**", scanned[-2])
+        self.assertNotIn("**Space floors**", scanned[-2])
+
+    def test_flush_has_its_own_long_timeout_and_a_shut_form_while_it_runs(self):
+        self.assertRegex(self.js, r"FLUSH_TIMEOUT_MS = 900000")
+        self.assertRegex(self.js, r'"/api/v1runs/flush", \{ method: "POST", body: body, timeoutMs: FLUSH_TIMEOUT_MS \}')
+        self.assertIn("Flushing turn \" + turn.id + \": ending the build, putting the videos back on their Archive record and deleting the Workbench copy.", self.js)
+        self.assertIn("function setFlushing(on)", self.js)
+        self.assertIn("if (res.status === 0) { setFlushing(false); readAfterTimeout(turn); return; }", self.js)
+        driver = (CLONE / "static" / "voyager_tools.js").read_text(encoding="utf-8")
+        self.assertIn("opts.timeoutMs", driver)
+        self.assertIn("}, limitMs);", driver)
+        self.assertNotIn("}, REQUEST_TIMEOUT_MS);", driver)
+
+    def test_a_dialog_in_flight_disables_its_button_and_the_unused_busy_flag_is_gone(self):
+        self.assertNotIn("busy: false", self.js)
+        self.assertNotIn("st.busy", self.js)
+        self.assertEqual(self.js.count("st.confirming = true;"), 2)
+        self.assertIn("el.go.disabled = true;\n      ctx.confirmDialog", self.js)
+        self.assertIn("el.shelfGo.disabled = true;\n      ctx.confirmDialog", self.js)
+
+    def test_flush_stays_the_primary_action_and_the_shelf_button_is_secondary(self):
+        self.assertRegex(self.tpl, r'class="btn" data-vt="v1-shelf-go"')
+        self.assertNotIn("btn-primary", self.tpl)
+        self.assertRegex(self.tpl, r'class="btn btn-danger" data-vt="v1-flush-go"')
+
+    def test_with_no_batch_or_no_driver_the_table_and_shelf_form_are_hidden(self):
+        self.assertRegex(self.tpl, r'data-vt="v1-table-box"[^>]*hidden')
+        self.assertRegex(self.tpl, r'data-vt="v1-shelf-box"[^>]*hidden')
+        self.assertIn("el.tableBox.hidden = !st.turns.length;", self.js)
+        self.assertIn("el.shelfBox.hidden = !model.batch;", self.js)
+        failure = self.js[self.js.index("if (!res.ok) {\n          st.turns = [];"):self.js.index("render(res.data);")]
+        self.assertIn("el.tableBox.hidden = true;", failure)
+        self.assertIn("el.shelfBox.hidden = true;", failure)
+        css = (CLONE / "static" / "voyager_tools.css").read_text(encoding="utf-8")
+        self.assertIn(".voyager-tools .vt-v1-tablebox[hidden]", css)
+
+    def test_the_move_buttons_never_wrap(self):
+        css = (CLONE / "static" / "voyager_tools.css").read_text(encoding="utf-8")
+        self.assertRegex(css, r"td\.vt-v1-actions \{ white-space: nowrap; \}")
 
     def test_requeue_and_resume_are_ticked_by_default(self):
         self.assertRegex(self.tpl, r'data-vt="v1-requeue" checked')

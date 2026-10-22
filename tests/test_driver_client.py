@@ -113,6 +113,25 @@ class ClientCalls(unittest.TestCase):
         self.assertEqual(call["body"], {"turn_id": 6, "initials": "LO", "reason": "hung on gap fill",
                                         "requeue": True, "resume": False})
 
+    def test_only_the_flush_has_the_long_timeout(self):
+        self.assertEqual(dc.FLUSH_TIMEOUT_S, 900)
+        seen = []
+        client = dc.DriverClient(self.fake.url)
+        real = client._open
+        client._open = lambda request, timeout=None: (seen.append((request.get_method() + " " + request.full_url.split("?")[0].rsplit("/", 1)[1], timeout)),
+                                                      real(request, timeout=timeout))[1]
+        self.fake.reply(200, {"ok": True})
+        client.flush(6, "LO", "hung", True, True)
+        client.set_batch_shelf("/volume5/x", "LO", "why")
+        client.status()
+        client.flush_preview(6)
+        timeouts = dict(seen)
+        self.assertEqual(timeouts["POST flush"], dc.FLUSH_TIMEOUT_S)
+        self.assertEqual(timeouts["PATCH batch"], dc.WRITE_TIMEOUT_S)
+        self.assertEqual(timeouts["GET status"], dc.STATUS_TIMEOUT_S)
+        self.assertEqual(timeouts["GET flush"], dc.PREVIEW_TIMEOUT_S)
+        self.assertLess(dc.WRITE_TIMEOUT_S, dc.FLUSH_TIMEOUT_S)
+
     def test_move_turn_accepts_end_start_and_a_position(self):
         self.fake.reply(200, {"order": [7, 8]})
         for target in ("end", "start", 0, 3):
@@ -122,9 +141,9 @@ class ClientCalls(unittest.TestCase):
         self.assertTrue(all(c["path"] == "/api/turns/8/move" and c["method"] == "POST" for c in self.fake.calls))
 
     def test_set_batch_shelf_patches_the_batch(self):
-        self.fake.reply(200, {"shelf_root": "/volume5/Archive10_20TB/driver_deposits", "applies_to_turns": 3})
+        self.fake.reply(200, {"shelf_root": "/volume5/Archive10_20TB/driver_deposits", "applies_to_turns": [7, 8, 9]})
         out = self.client.set_batch_shelf("/volume5/Archive10_20TB/driver_deposits", "LO", "Archive8 is full")
-        self.assertEqual(out["applies_to_turns"], 3)
+        self.assertEqual(out["applies_to_turns"], [7, 8, 9])
         call = self.fake.calls[0]
         self.assertEqual((call["method"], call["path"]), ("PATCH", "/api/batch"))
         self.assertEqual(call["body"], {"shelf_root": "/volume5/Archive10_20TB/driver_deposits", "initials": "LO",
@@ -208,7 +227,7 @@ class ClientFailures(unittest.TestCase):
             port = sock.getsockname()[1]
         client = dc.DriverClient(f"http://127.0.0.1:{port}")
         exc = self.assert_error(lambda: client.status(), None, None, unreachable=True)
-        self.assertRegex(exc.reason, rf"^The driver on port {port} did not answer: .+\.$")
+        self.assertEqual(exc.reason, f"The driver on port {port} did not answer: Connection refused.")
         self.assertEqual(exc.http_status, 502)
 
     def test_timeout_is_unreachable(self):

@@ -929,7 +929,7 @@ class PanelShape(ToolsCase):
     def test_settings_panes_carry_fields_reason_and_one_primary_button(self):
         page = self.page()
         for key, button in (("settings", "Save manual edit settings"), ("shelf", "Save the Shelf copy setting"),
-                            ("runs", "Save Voyager run settings"), ("floors", "Save space floors")):
+                            ("runs", "Save Voyager run settings"), ("floors", "Save driver settings")):
             with self.subTest(key=key):
                 body = views.slice_section(page, f'<section class="vt-pane" id="vt-{key}"')
                 self.assertIn(f'data-vt="{key}-fields"', body)

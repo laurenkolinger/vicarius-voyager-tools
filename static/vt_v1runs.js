@@ -1,4 +1,4 @@
-/* static/vt_v1runs.js - the Voyager 1 runs pane of the Atlas control panel,
+/* static/vt_v1runs.js - the Voyager 1 batch pane of the Atlas control panel,
  * registered on the pane seam of static/voyager_tools.js.
  *
  * The pane reads the driver's batch through GET /api/v1runs (the model built
@@ -10,7 +10,8 @@
  * from the server goes through esc() before it reaches innerHTML.
  *
  * The pure helpers (esc, hoursWords, gigabytes, previewItems, moveTarget,
- * initialsSeed, flushBody, rowHtml, batchHtml) are exported to node through
+ * initialsSeed, flushBody, rowHtml, batchHtml, shelfWords, flushedLine,
+ * timeoutLine) are exported to node through
  * module.exports for tests/test_v1runs_pins.py.
  */
 (function () {
@@ -26,6 +27,7 @@
   var LINE_REASON = "Type the reason first.";
   var LINE_SHELF = "Type the Shelf folder first.";
   var LINE_NOT_PICKED = "Pick a turn to flush first.";
+  var FLUSH_TIMEOUT_MS = 900000; // same as FLUSH_TIMEOUT_S in voyagertools/driver_client.py
   var FLAG_OVER = "over the limit";
   var FLAG_GONE = "build process gone";
 
@@ -86,10 +88,12 @@
   function previewItems(preview) {
     var p = preview && typeof preview === "object" ? preview : {};
     var items = [];
+    var rows = Array.isArray(p.rows) ? p.rows : [];
     if (p.can_flush === false) {
       items.push({ kind: "refusal", text: p.refusal || "The driver will not flush this turn." });
+      // a refused turn the driver could not read carries no rows: the sentence alone says it
+      if (!rows.length) return items;
     }
-    var rows = Array.isArray(p.rows) ? p.rows : [];
     items.push({ kind: "rows", text: plural(rows.length, "video") + " go back to their record in the Archive, with their build cells cleared.",
                  rows: rows.map(function (r) {
                    r = r && typeof r === "object" ? r : {};
@@ -109,6 +113,31 @@
       : "No build process is running." });
     if (p.frozen) items.push({ kind: "frozen", text: "The build is frozen; the driver continues it, then ends it." });
     return items;
+  }
+
+  // idsWords([7, 8, 9]): "7, 8 and 9"; one id alone; "" for none.
+  function idsWords(ids) {
+    var list = ids.map(String);
+    if (list.length < 2) return list.join("");
+    return list.slice(0, -1).join(", ") + " and " + list[list.length - 1];
+  }
+
+  // shelfWords(answer): the sentence after a Shelf change. applies_to_turns is the list of turn ids the driver re-pointed.
+  function shelfWords(answer) {
+    var a = answer && typeof answer === "object" ? answer : {};
+    var ids = Array.isArray(a.applies_to_turns) ? a.applies_to_turns : [];
+    var tail = ids.length ? "for " + (ids.length === 1 ? "turn " : "turns ") + idsWords(ids) + "." : "for no turn yet; new turns use it.";
+    return "The Shelf is now " + (a.shelf_root || "not reported") + " " + tail;
+  }
+
+  // timeoutLine(turnId, model): what the driver's status shows for the turn after the flush call got no answer.
+  function timeoutLine(turnId, model) {
+    var turns = model && Array.isArray(model.turns) ? model.turns : [];
+    var turn = turns.filter(function (t) { return String(t.id) === String(turnId); })[0];
+    var head = "The flush of turn " + turnId + " got no answer within 15 minutes. ";
+    if (!turn) return head + "The driver no longer lists the turn.";
+    if (turn.status === "flushed") return head + "The driver shows turn " + turnId + " as flushed.";
+    return head + "The driver shows turn " + turnId + " as " + turn.status + "; the flush may still be running, so press Refresh to read it again.";
   }
 
   function previewHtml(items) {
@@ -137,14 +166,20 @@
     return flags.map(function (f) { return '<span class="vt-v1-flag">' + f + "</span>"; }).join("");
   }
 
-  // flushedHtml(row): the line under the status chip of a flushed turn: who, when, why and where it was put back.
-  function flushedHtml(row) {
-    var f = row.flushed;
+  // flushedLine(f): who flushed, when, why and where it was put back, as full sentences.
+  function flushedLine(f) {
     if (!f) return "";
     var who = f.by ? "Flushed by " + f.by + (f.at ? ", " + f.at : "") + "." : (f.at ? "Flushed " + f.at + "." : "");
+    var reason = f.reason ? String(f.reason).trim() : "";
+    if (reason && !/[.!?]$/.test(reason)) reason += ".";
     var requeued = f.requeued_as ? "Put back as turn " + f.requeued_as + "." : "";
-    var line = [who, f.reason, requeued].filter(Boolean).join(" ");
-    return line ? '<span class="count vt-v1-note">' + esc(line) + "</span>" : "";
+    return [who, reason, requeued].filter(Boolean).join(" ");
+  }
+
+  // flushedHtml(row): the row under a flushed turn, spanning the table, so the note has room.
+  function flushedHtml(row) {
+    var line = flushedLine(row.flushed);
+    return line ? '<tr class="vt-v1-note-row" data-vt-v1-note="' + esc(row.id) + '"><td></td><td colspan="4" class="count">' + esc(line) + "</td></tr>" : "";
   }
 
   function hoursHtml(row) {
@@ -181,9 +216,9 @@
     return '<tr data-vt-v1-row="' + esc(row.id) + '">' +
       '<td class="vt-num">' + esc(row.id) + "</td>" +
       "<td>" + name + chip(row.transect || "unknown") + '<span class="vt-v1-videos">' + videos + "</span></td>" +
-      '<td class="vt-v1-status">' + stateHtml(row.role, row.status) + flagsHtml(row) + flushedHtml(row) + "</td>" +
+      '<td class="vt-v1-status">' + stateHtml(row.role, row.status) + flagsHtml(row) + "</td>" +
       "<td>" + hoursHtml(row) + "</td>" +
-      '<td class="vt-v1-actions">' + actionsHtml(row) + "</td></tr>";
+      '<td class="vt-v1-actions">' + actionsHtml(row) + "</td></tr>" + flushedHtml(row);
   }
 
   function batchHtml(batch) {
@@ -196,7 +231,7 @@
     return batch && batch.time_limit_hours ? "Videos over " + hoursWords(batch.time_limit_hours).replace(" h", " hours") + " are flushed automatically." : "";
   }
 
-  var helpers = { esc: esc, hoursWords: hoursWords, gigabytes: gigabytes, previewItems: previewItems, previewHtml: previewHtml,
+  var helpers = { shelfWords: shelfWords, flushedLine: flushedLine, timeoutLine: timeoutLine, esc: esc, hoursWords: hoursWords, gigabytes: gigabytes, previewItems: previewItems, previewHtml: previewHtml,
                   moveTarget: moveTarget, initialsSeed: initialsSeed, flushBody: flushBody, rowHtml: rowHtml,
                   batchHtml: batchHtml, limitLine: limitLine, INITIALS_RE: INITIALS_RE };
   if (typeof module === "object" && module && module.exports) module.exports = helpers;
@@ -213,13 +248,15 @@
   register("v1runs", function (ctx) {
     var el = {
       batch: ctx.q("v1-batch"), limit: ctx.q("v1-limit"), body: ctx.q("v1-body"), empty: ctx.q("v1-empty"),
+      tableBox: ctx.q("v1-table-box"),
       refresh: ctx.q("v1-refresh"), flush: ctx.q("v1-flush"), flushTitle: ctx.q("v1-flush-title"),
       preview: ctx.q("v1-preview"), initials: ctx.q("v1-initials"), reason: ctx.q("v1-reason"),
       requeue: ctx.q("v1-requeue"), resume: ctx.q("v1-resume"), go: ctx.q("v1-flush-go"), cancel: ctx.q("v1-flush-cancel"),
       shelf: ctx.q("v1-shelf"), shelfInitials: ctx.q("v1-shelf-initials"), shelfReason: ctx.q("v1-shelf-reason"),
-      shelfGo: ctx.q("v1-shelf-go"), result: ctx.q("v1-result")
+      shelfGo: ctx.q("v1-shelf-go"), result: ctx.q("v1-result"), shelfBox: ctx.q("v1-shelf-box")
     };
-    var st = { turns: [], picked: null, batch: null, busy: false };
+    var st = { turns: [], picked: null, batch: null, flushing: false, confirming: false };
+    var lockedInputs = [el.initials, el.reason, el.requeue, el.resume, el.cancel];
 
     function remembered() {
       var box = ctx.root.querySelector("#vt-initials");
@@ -258,6 +295,9 @@
       el.limit.textContent = limitLine(model.batch);
       el.limit.hidden = !el.limit.textContent;
       el.body.innerHTML = st.turns.map(rowHtml).join("");
+      if (st.flushing) setFlushing(true);
+      el.tableBox.hidden = !st.turns.length;
+      el.shelfBox.hidden = !model.batch;
       el.empty.textContent = model.line || (model.truncated ? "Only the first turns are shown." : "");
       el.empty.hidden = !el.empty.textContent;
       if (model.batch && model.batch.shelf_root && !el.shelf.value) el.shelf.value = model.batch.shelf_root;
@@ -269,9 +309,13 @@
         if (ctx.isRelocked()) return;
         if (!res.ok) {
           st.turns = [];
+          st.batch = null;
           el.body.innerHTML = "";
           el.batch.innerHTML = "";
           el.limit.hidden = true;
+          el.tableBox.hidden = true;
+          el.shelfBox.hidden = true;
+          el.empty.hidden = true;
           ctx.fail(el.result, res);
           return;
         }
@@ -279,7 +323,16 @@
       });
     }
 
+    // setFlushing(on): while a flush is in flight the button, the form and the row Flush buttons take no input.
+    function setFlushing(on) {
+      st.flushing = on;
+      el.go.disabled = true;
+      lockedInputs.forEach(function (box) { box.disabled = on; });
+      Array.prototype.forEach.call(el.body.querySelectorAll("[data-vt-v1-flush]"), function (b) { b.disabled = on; });
+    }
+
     function closeFlush() {
+      if (st.flushing) return;
       st.picked = null;
       el.flush.hidden = true;
       el.preview.innerHTML = "";
@@ -288,6 +341,7 @@
     }
 
     function openFlush(id) {
+      if (st.flushing) return;
       var turn = findTurn(id);
       if (!turn) { ctx.setResult(el.result, esc(LINE_NOT_PICKED), "error"); return; }
       st.picked = turn.id;
@@ -318,19 +372,41 @@
       var lines = ["The driver ends the build of turn " + turn.id + ", gives its videos back to the Archive and deletes its Workbench folder. This cannot be undone.",
                    el.requeue.checked ? "The transect goes back at the end of the queue." : "The transect is not queued again.",
                    el.resume.checked ? "The batch carries on with the next transect." : "The batch stays paused."];
+      if (st.confirming) return;
+      st.confirming = true;
+      el.go.disabled = true;
       ctx.confirmDialog({ title: "Flush turn " + turn.id, lines: lines, okLabel: "Flush" }).then(function (ok) {
-        if (!ok) return;
-        ctx.busy(el.go, true);
-        var body = flushBody({ turn: turn.id, initials: who, reason: reason, requeue: el.requeue.checked, resume: el.resume.checked });
-        ctx.api("/api/v1runs/flush", { method: "POST", body: body }).then(function (res) {
-          ctx.busy(el.go, false);
-          if (!res.ok) { ctx.fail(el.result, res); return; }
-          var d = res.data || {};
-          ctx.setResult(el.result, esc("Turn " + turn.id + " flushed. " + plural(d.rows_restored || 0, "video") + " back in the Archive, " +
-            gigabytes(d.reclaimed_bytes) + " deleted" + (d.requeued_as ? ", put back as turn " + d.requeued_as : "") + "."));
-          closeFlush();
-          load();
-        });
+        st.confirming = false;
+        if (!ok) { el.go.disabled = false; return; }
+        runFlush(turn, who, reason);
+      });
+    }
+
+    // runFlush(turn, who, reason): the POST, with its own 15 minute limit; the form stays shut until the driver answers.
+    function runFlush(turn, who, reason) {
+      var body = flushBody({ turn: turn.id, initials: who, reason: reason, requeue: el.requeue.checked, resume: el.resume.checked });
+      setFlushing(true);
+      ctx.setResult(el.result, esc("Flushing turn " + turn.id + ": ending the build, putting the videos back on their Archive record and deleting the Workbench copy."));
+      if (el.result.scrollIntoView) el.result.scrollIntoView({ block: "nearest" });
+      ctx.api("/api/v1runs/flush", { method: "POST", body: body, timeoutMs: FLUSH_TIMEOUT_MS }).then(function (res) {
+        if (res.status === 0) { setFlushing(false); readAfterTimeout(turn); return; }
+        setFlushing(false);
+        if (!res.ok) { el.go.disabled = false; ctx.fail(el.result, res); return; }
+        var d = res.data || {};
+        ctx.setResult(el.result, esc("Turn " + turn.id + " flushed. " + plural(d.rows_restored || 0, "video") + " back in the Archive, " +
+          gigabytes(d.reclaimed_bytes) + " deleted" + (d.requeued_as ? ", put back as turn " + d.requeued_as : "") + "."));
+        closeFlush();
+        load();
+      });
+    }
+
+    // readAfterTimeout(turn): the call got no answer; the driver's status says what became of the turn.
+    function readAfterTimeout(turn) {
+      closeFlush();
+      ctx.api("/api/v1runs").then(function (res) {
+        if (!res.ok) { ctx.fail(el.result, res); return; }
+        render(res.data);
+        ctx.setResult(el.result, esc(timeoutLine(turn.id, res.data)), "error");
       });
     }
 
@@ -354,15 +430,19 @@
       if (!shelf) { ctx.setResult(el.result, esc(LINE_SHELF), "error"); el.shelf.focus(); return; }
       if (!INITIALS_RE.test(who)) { ctx.setResult(el.result, esc(LINE_INITIALS), "error"); el.shelfInitials.focus(); return; }
       if (!reason) { ctx.setResult(el.result, esc(LINE_REASON), "error"); el.shelfReason.focus(); return; }
+      if (st.confirming) return;
+      st.confirming = true;
+      el.shelfGo.disabled = true;
       ctx.confirmDialog({ title: "Change the Shelf", primary: true, okLabel: "Change the Shelf",
         lines: ["The batch deposits its remaining transects into " + shelf + ".", "Transects already deposited stay where they are."] }).then(function (ok) {
-        if (!ok) return;
+        st.confirming = false;
+        if (!ok) { el.shelfGo.disabled = false; return; }
         ctx.busy(el.shelfGo, true);
         ctx.api("/api/v1runs/shelf", { method: "POST", body: { shelf_root: shelf, initials: who, reason: reason, confirm: true } }).then(function (res) {
           ctx.busy(el.shelfGo, false);
           if (!res.ok) { ctx.fail(el.result, res); return; }
           el.shelfReason.value = "";
-          ctx.setResult(el.result, esc("The Shelf is now " + res.data.shelf_root + " for " + plural(res.data.applies_to_turns || 0, "turn") + "."));
+          ctx.setResult(el.result, esc(shelfWords(res.data)));
           load();
         });
       });

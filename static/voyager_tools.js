@@ -23,7 +23,7 @@
  * session script, decision 8 of the manual edit chain), hides the tools
  * behind the admin line with an Unlock admin button, and the next unlock
  * brings them back; a 423 shows the lock message. Every request gives up
- * after REQUEST_TIMEOUT_MS with a sentence saying the action may still have
+ * after REQUEST_TIMEOUT_MS (or the call's own options.timeoutMs) with a sentence saying the action may still have
  * happened. Destructive actions open a role=dialog
  * confirm that names what will change; Escape closes it without bubbling,
  * because the desktop closes a window on a bubbled Escape.
@@ -125,7 +125,10 @@
       else if (inst.wasAttached) instances.splice(i, 1);
     }
   }
-  var LINE_TIMEOUT = "No answer from the desktop after 30 s; the action may still have happened. Reload the pane before trying again.";
+  // timeoutLine(ms): the sentence for a request that got no answer within ms.
+  function timeoutLine(ms) {
+    return "No answer from the desktop after " + Math.round(ms / 1000) + " s; the action may still have happened. Reload the pane before trying again.";
+  }
 
   function adminSession() { return window.VICADMINSESSION || null; }
 
@@ -233,11 +236,12 @@
         init.headers["Content-Type"] = "application/json";
         init.body = JSON.stringify(opts.body);
       }
+      var limitMs = typeof opts.timeoutMs === "number" && opts.timeoutMs > 0 ? opts.timeoutMs : REQUEST_TIMEOUT_MS;
       var controller = typeof AbortController === "function" ? new AbortController() : null;
       var timer = null;
       if (controller) {
         init.signal = controller.signal;
-        timer = setTimeout(function () { controller.abort(); }, REQUEST_TIMEOUT_MS);
+        timer = setTimeout(function () { controller.abort(); }, limitMs);
       }
       return fetch(url, init).then(function (r) {
         return r.json().catch(function () { return {}; }).then(function (data) {
@@ -251,7 +255,7 @@
           return { ok: r.ok, status: r.status, data: data };
         });
       }).catch(function (err) {
-        if (err && err.name === "AbortError") return { ok: false, status: 0, data: { error: LINE_TIMEOUT } };
+        if (err && err.name === "AbortError") return { ok: false, status: 0, data: { error: timeoutLine(limitMs) } };
         return { ok: false, status: 0, data: { error: "The request did not reach VICARIUS: " + err } };
       }).then(function (res) {
         if (timer !== null) clearTimeout(timer);

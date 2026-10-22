@@ -4,8 +4,8 @@
  *
  * Four settings panes write through the desktop's one write path per store
  * (vicarius_ui_os/settings_views.py): Manual edit settings and Shelf copy
- * (/api/settings/manual-edit, /api/settings/shelf), Voyager runs
- * (/api/settings/voyager) and Space floors (/api/settings/floors). Each
+ * (/api/settings/manual-edit, /api/settings/shelf), Voyager run settings
+ * (/api/settings/voyager) and Driver settings (/api/settings/floors). Each
  * renders its fields from the GET payload {store, fields, values, saved_at,
  * saved_by, drift}, enables its one primary button only when a value
  * differs, asks for a confirmation that names the old and new values when a
@@ -47,7 +47,7 @@
   var ADMIN_CHIP_ID = "tb-admin";
   var HTTP_NOT_FOUND = 404;
   var STORE_LABELS = {
-    manual_edit: "Manual edit settings", voyager_config: "Voyager runs", driver_nas: "Space floors",
+    manual_edit: "Manual edit settings", voyager_config: "Voyager run settings", driver_nas: "Driver settings",
     desktop_prefs: "Appearance and icon layout", module_locks: "Module locks", module_meta: "Module details",
     voyagerparams: "Parameter defaults"
   };
@@ -536,7 +536,7 @@
 
   register("floors", settingsPane({
     key: "floors", route: "/api/settings/floors", store: "driver_nas",
-    title: "Change the space floors", okLabel: "Save space floors",
+    title: "Change the driver settings", okLabel: "Save driver settings",
     extra: function (ctx, payload) {
       var line = ctx.q("floors-driver");
       if (!line) return;

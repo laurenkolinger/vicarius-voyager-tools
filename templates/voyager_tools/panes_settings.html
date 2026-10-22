@@ -55,10 +55,10 @@
         <p class="result" data-vt="shelf-result" role="status"></p>
       </section>
 
-      {# 11. Voyager runs (store voyager_config) #}
+      {# 11. Voyager run settings (store voyager_config) #}
       <section class="vt-pane" id="vt-runs" role="tabpanel" data-vt-pane="runs" aria-labelledby="vt-runs-h" hidden>
         <div class="pane-head">
-          <h2 id="vt-runs-h">Voyager runs</h2>
+          <h2 id="vt-runs-h">Voyager run settings</h2>
           <button type="button" class="tip" aria-label="About the Voyager run settings" title="The run switches stand in front of every real Voyager batch, and the Workbench removal defaults pre-tick one box in each new batch. VICARIUS keeps them in /mnt/rip/vicarius_drive/vicarius_ui_os/config/voyager.json; each batch still chooses its own Advanced settings."><span>i</span></button>
         </div>
         <p class="count vt-line" data-vt="runs-meta"></p>
@@ -124,11 +124,11 @@
         <p class="result" data-vt="appearance-result" role="status"></p>
       </section>
 
-      {# 15. Space floors (store driver_nas) #}
+      {# 15. Driver settings (store driver_nas) #}
       <section class="vt-pane" id="vt-floors" role="tabpanel" data-vt-pane="floors" aria-labelledby="vt-floors-h" hidden>
         <div class="pane-head">
-          <h2 id="vt-floors-h">Space floors</h2>
-          <button type="button" class="tip" aria-label="About the space floors" title="Manual edit pulls, uploads and start overs read these values at the moment each copy starts. The driver's own batches read them when the driver starts, and each batch keeps the values it was created with; the NAS host, account, key, roots and the in-flight folder are never edited here."><span>i</span></button>
+          <h2 id="vt-floors-h">Driver settings</h2>
+          <button type="button" class="tip" aria-label="About the driver settings" title="Manual edit pulls, uploads and start overs read these values at the moment each copy starts. The driver's own batches read them when the driver starts, and each batch keeps the values it was created with; the NAS host, account, key, roots and the in-flight folder are never edited here."><span>i</span></button>
         </div>
         <p class="count vt-line" data-vt="floors-meta"></p>
         <p class="vt-line" data-vt="floors-driver"></p>
@@ -136,12 +136,12 @@
         <div class="vt-fields" data-vt="floors-fields"></div>
         <dl class="choices vt-reason-row">
           <div>
-            <dt><label for="vt-floors-reason">Reason</label><button type="button" class="tip" aria-label="About the reason" title="Type why the floors change. VICARIUS refuses a change of a floor without a reason and writes it beside each change in the settings history."><span>?</span></button></dt>
+            <dt><label for="vt-floors-reason">Reason</label><button type="button" class="tip" aria-label="About the reason" title="Type why the settings change. VICARIUS refuses a change of a floor without a reason and writes it beside each change in the settings history."><span>?</span></button></dt>
             <dd><input type="text" id="vt-floors-reason" class="vt-field vt-reason" data-vt="floors-reason" maxlength="500" autocomplete="off"></dd>
           </div>
         </dl>
         <div class="actions">
-          <button type="button" class="btn btn-primary" data-vt="floors-save" disabled title="Save the changed floors after a confirmation. VICARIUS rewrites only their lines of /mnt/rip/vicarius_drive/vicarius/modules/driver/github_repo/config/nas.yaml and keeps every comment.">Save space floors</button>
+          <button type="button" class="btn btn-primary" data-vt="floors-save" disabled title="Save the changed driver settings after a confirmation. VICARIUS rewrites only their lines of /mnt/rip/vicarius_drive/vicarius/modules/driver/github_repo/config/nas.yaml and keeps every comment.">Save driver settings</button>
         </div>
         <p class="result" data-vt="floors-result" role="status"></p>
       </section>
@@ -179,8 +179,8 @@
             <dd><select id="vt-history-store" class="vt-field" data-vt="history-store">
               <option value="">Every store</option>
               <option value="manual_edit">Manual edit settings and Shelf copy</option>
-              <option value="voyager_config">Voyager runs</option>
-              <option value="driver_nas">Space floors</option>
+              <option value="voyager_config">Voyager run settings</option>
+              <option value="driver_nas">Driver settings</option>
               <option value="desktop_prefs">Appearance and icon layout</option>
               <option value="module_locks">Module locks</option>
               <option value="module_meta">Module details</option>
