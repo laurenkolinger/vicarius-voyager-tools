@@ -43,6 +43,29 @@ _Avoid_: mismatch, stale
 The desktop session state (the ADMIN chip on port 5090, `session["admin_unlocked"]`) that every route of this module requires; outside it a route answers 401 and the desktop hides the item. Distinct from the module lock, which blocks everyone including admin.
 _Avoid_: dev mode
 
+## Voyager 1 runs
+
+**Batch**:
+The driver's list of transects Voyager 1 builds one after another, with one Shelf folder. The pane reads it from the driver's status and never writes it.
+_Avoid_: queue (the queue is the pending turns of a batch), job
+
+**Turn**:
+One transect of a batch with its four videos, numbered in the order the batch was made. Its status is pending, running, paused, error, stopped, done, scrapped or flushed.
+_Avoid_: run, task
+
+**Flush**:
+Giving up one transect: the driver ends its build, puts its videos back on their Archive record with the build cells cleared, deletes the turn's Workbench folder and marks the turn flushed with who, when and why. All or nothing for the transect, so a video that had finished is lost with it. Optionally the transect goes back at the end of the queue and the batch carries on with the next one. The driver also flushes a video built for more than the time limit by itself.
+_Avoid_: reset, scrap (scrap gives up a whole paused batch), delete
+
+**Time limit**:
+The most hours the driver lets one video be built for (11 hours); the line on the pane says so and nothing on the pane changes it.
+
+**Build process gone**:
+A turn the driver lists as running while it reports no live build process for it. Flush clears it.
+
+**Batch Shelf**:
+The NAS folder the running batch deposits finished transects into. The pane changes it for the turns not yet deposited; transects already on the Shelf stay where they are.
+
 ## The processing order
 
 **Processing order**:

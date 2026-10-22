@@ -67,14 +67,15 @@ FOLDER = "MRS_T1_3D"  # the one processing folder of MRS T1, named for site and 
 NAV_GROUPS = [
     ("Records", ["order", "seasons", "prompts"]),
     ("Manual edit", ["review", "uploads", "timelines", "settings", "shelf", "manual"]),
-    ("Voyager", ["runs", "params", "rewind", "spot", "workbench"]),
+    ("Voyager", ["runs", "v1runs", "params", "rewind", "spot", "workbench"]),
     ("Desktop", ["locks", "modules", "appearance", "floors", "gpu"]),
     ("History", ["history"]),
 ]
 ALL_TABS = [key for _group, keys in NAV_GROUPS for key in keys]
 # The panel's scripts in load order: the pane seam first, then one script per
 # group of panes (program C spec 5.3).
-PANEL_SCRIPT_NAMES = ["voyager_tools.js", "vt_settings.js", "vt_uploads.js", "vt_timelines.js", "vt_review.js"]
+PANEL_SCRIPT_NAMES = ["voyager_tools.js", "vt_settings.js", "vt_uploads.js", "vt_timelines.js", "vt_review.js",
+                      "vt_v1runs.js"]
 PANEL_SCRIPT_URLS = ["/voyager-tools/static/" + name + "?v=" + views.ASSET_VERSION for name in PANEL_SCRIPT_NAMES]
 
 SEED_V1 = """# params_version: 1.0.0
@@ -896,7 +897,7 @@ class PanelShape(ToolsCase):
         import re
         page = self.page()
         nav = page[page.index('<nav class="vt-nav"'):page.index("</nav>")]
-        items = re.findall(r'<p class="vt-nav-group" role="presentation">([^<]+)</p>|data-vt-tab="([a-z_]+)"', nav)
+        items = re.findall(r'<p class="vt-nav-group" role="presentation">([^<]+)</p>|data-vt-tab="([a-z0-9_]+)"', nav)
         groups, current = [], None
         for heading, key in items:
             if heading:
@@ -906,7 +907,7 @@ class PanelShape(ToolsCase):
                 self.assertIsNotNone(current, "a tab sits before the first group heading")
                 current[1].append(key)
         self.assertEqual(groups, [(name, keys) for name, keys in NAV_GROUPS])
-        keys = re.findall(r'data-vt-tab="([a-z_]+)"', page)
+        keys = re.findall(r'data-vt-tab="([a-z0-9_]+)"', page)
         self.assertEqual(sorted(keys), sorted(ALL_TABS))
         self.assertEqual(len(keys), len(set(keys)))
 

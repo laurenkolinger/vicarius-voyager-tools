@@ -54,7 +54,8 @@ from pathlib import Path
 import yaml
 from flask import Blueprint, current_app, g, jsonify, render_template, request, session
 
-from . import camera_tool, clean_manual_edit, clean_voyager2_stage, clean_workbench, order_tool, rewind
+from . import camera_tool, clean_manual_edit, clean_voyager2_stage, clean_workbench, driver_client, order_tool, rewind
+from . import v1runs
 from . import rewind_voyager2
 from . import paramsstore as ps
 
@@ -65,16 +66,18 @@ URL_PREFIX = "/voyager-tools"
 MODULE_SLUG = "voyager_tools"
 DISPLAY_NAME = "Atlas control panel"
 UI_STYLE = "voyager_tools"
-ASSET_VERSION = "20260928b"
+ASSET_VERSION = "20261021a"
 ROOT_SECTION_PREFIX = '<section class="voyager-tools"'
 STATIC_JS = "voyager_tools.js"
 STATIC_SETTINGS_JS = "vt_settings.js"  # the settings and desktop panes (program C spec 5.3)
 STATIC_UPLOADS_JS = "vt_uploads.js"  # the Uploads pane (milestone C7)
 STATIC_TIMELINES_JS = "vt_timelines.js"  # the Timelines pane (milestone C8)
 STATIC_REVIEW_JS = "vt_review.js"  # the Review queue pane and VoyagerTools.mountReview (milestone C6)
+STATIC_V1RUNS_JS = "vt_v1runs.js"  # the Voyager 1 runs pane (flush, move, batch Shelf)
 STATIC_CSS = "voyager_tools.css"
 # Load order: the pane seam first, then one script per group of panes.
-PANEL_SCRIPTS = (STATIC_JS, STATIC_SETTINGS_JS, STATIC_UPLOADS_JS, STATIC_TIMELINES_JS, STATIC_REVIEW_JS)
+PANEL_SCRIPTS = (STATIC_JS, STATIC_SETTINGS_JS, STATIC_UPLOADS_JS, STATIC_TIMELINES_JS, STATIC_REVIEW_JS,
+                 STATIC_V1RUNS_JS)
 # The review fragment (program C spec 4.11) loads the pane seam, the upload
 # window its Start the upload now opens (vt_uploads.js), and the review content.
 REVIEW_SCRIPTS = (STATIC_JS, STATIC_UPLOADS_JS, STATIC_REVIEW_JS)
@@ -428,7 +431,9 @@ class Deps:
     sets a desktop restart stranded; recover_restarts(records) -> records,
     its recovery of start overs a desktop restart stranded;
     manual_edit_deps() -> the manual edit module's Deps kit in this app, or
-    None when it is not mounted (the one cancel reads its leg registries).
+    None when it is not mounted (the one cancel reads its leg registries);
+    driver_client() -> a DriverClient for the driver's API (the Voyager 1
+    runs pane; a test returns a fake).
     """
 
     def __init__(self):
@@ -455,6 +460,7 @@ class Deps:
         self.recover_uploads: Callable = _recover_uploads_default
         self.recover_restarts: Callable[[list], list] = _recover_restarts_default
         self.manual_edit_deps: Callable = _manual_edit_deps_default
+        self.driver_client: Callable = driver_client.DriverClient
 
 
 deps = Deps()
@@ -1567,6 +1573,110 @@ def api_seasons_save():
         raise RequestError(str(exc.args[0]) if exc.args else str(exc))
     line = deps.registry().season(key)
     return jsonify({"ok": True, "changed": changed, "season": line, "label": camera_tool.season_label(key)})
+
+
+# --- the Voyager 1 runs pane: flush, move, batch Shelf (through the driver's API) ----------------------
+
+LOG_V1RUNS = "voyager tools: %s %s by %s: %s"
+
+
+def _driver_call(method: str, *args):
+    """Call a method of the driver client; a DriverError becomes a RequestError with the driver's sentence.
+
+    Parameters:
+        method: the DriverClient method name (status, flush_preview, flush, move_turn, set_batch_shelf).
+    Returns:
+        The parsed JSON object the driver answered.
+    Raises:
+        RequestError: 400, 404 or 409 as the driver answered, else 502 (unreachable, error status, not JSON).
+    """
+    try:
+        return getattr(deps.driver_client(), method)(*args)
+    except driver_client.DriverError as exc:
+        raise RequestError(exc.reason, exc.http_status)
+
+
+def _turn_number(value) -> int:
+    """A turn number of 1 or more from a body or query value (a whole number or its digits)."""
+    if isinstance(value, str) and value.strip().isdigit():
+        value = int(value.strip())
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise RequestError("turn must be a whole number of 1 or more.")
+    return value
+
+
+def _flag(body: Mapping, key: str, default: bool) -> bool:
+    """A true or false value from the body; a missing key is the default, any other type is refused."""
+    value = body.get(key, default)
+    if not isinstance(value, bool):
+        raise RequestError(f"{key} must be true or false.")
+    return value
+
+
+def _move_target(value):
+    """The `to` of a move: "end", "start", or a position of 0 or more among the pending turns."""
+    if isinstance(value, str) and value in driver_client.MOVE_WORDS:
+        return value
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise RequestError('to must be "end", "start" or a position of 0 or more.')
+    return value
+
+
+@voyager_tools_bp.route("/api/v1runs", methods=["GET"])
+@guarded
+def api_v1runs():
+    """The Voyager 1 batch and its turns, as the pane draws them (the driver's status through v1runs.build_model)."""
+    model = v1runs.build_model(_driver_call("status"), deps.site_name)
+    model["read_at"] = deps.now_iso()
+    return jsonify(model)
+
+
+@voyager_tools_bp.route("/api/v1runs/flush-preview", methods=["GET"])
+@guarded
+def api_v1runs_flush_preview():
+    """What flushing ?turn= would do (the driver's preview, unchanged); nothing is flushed."""
+    return jsonify(_driver_call("flush_preview", _turn_number(request.args.get("turn"))))
+
+
+@voyager_tools_bp.route("/api/v1runs/flush", methods=["POST"])
+@guarded
+def api_v1runs_flush():
+    """Flush a turn: {turn_id, initials, reason, requeue, resume, confirm}; the driver's answer."""
+    body = _json_body()
+    who = _initials(body)
+    _confirmed(body)
+    turn = _turn_number(body.get("turn_id"))
+    reason = _text(body, "reason", required=True)
+    answer = _driver_call("flush", turn, who, reason, _flag(body, "requeue", True), _flag(body, "resume", True))
+    current_app.logger.info(LOG_V1RUNS, "flush of turn", turn, who, reason)
+    return jsonify(answer)
+
+
+@voyager_tools_bp.route("/api/v1runs/move", methods=["POST"])
+@guarded
+def api_v1runs_move():
+    """Move a pending turn: {turn_id, to, initials}; to is "end", "start" or a position among the pending turns."""
+    body = _json_body()
+    who = _initials(body)
+    turn = _turn_number(body.get("turn_id"))
+    target = _move_target(body.get("to"))
+    answer = _driver_call("move_turn", turn, target)
+    current_app.logger.info(LOG_V1RUNS, "move of turn", turn, who, f"to {target}")
+    return jsonify(answer)
+
+
+@voyager_tools_bp.route("/api/v1runs/shelf", methods=["POST"])
+@guarded
+def api_v1runs_shelf():
+    """Change the running batch's Shelf: {shelf_root, initials, reason, confirm}; the driver's answer."""
+    body = _json_body()
+    who = _initials(body)
+    _confirmed(body)
+    shelf = _text(body, "shelf_root", required=True, max_chars=driver_client.MAX_PATH_CHARS)
+    reason = _text(body, "reason", required=True)
+    answer = _driver_call("set_batch_shelf", shelf, who, reason)
+    current_app.logger.info(LOG_V1RUNS, "Shelf change to", shelf, who, reason)
+    return jsonify(answer)
 
 
 __all__ = [

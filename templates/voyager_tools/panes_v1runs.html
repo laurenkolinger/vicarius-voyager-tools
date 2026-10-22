@@ -1,0 +1,94 @@
+{#
+  File:    templates/voyager_tools/panes_v1runs.html
+  Purpose: The Voyager 1 runs pane of the Atlas control panel, included by
+           panel.html inside <div class="vt-panes">: the running batch (id,
+           status, Shelf folder, time limit), one row per turn with Flush for
+           a turn that hung or was cut off and Move for a pending turn, the
+           flush preview and form under the table, and the batch Shelf
+           change. Filled by static/vt_v1runs.js over /voyager-tools/api/v1runs;
+           the driver does the work. Var-free, like the other pane files.
+#}
+
+      {# Voyager 1 runs: flush, move, batch Shelf #}
+      <section class="vt-pane" id="vt-v1runs" role="tabpanel" data-vt-pane="v1runs" aria-labelledby="vt-v1runs-h" hidden>
+        <div class="pane-head">
+          <h2 id="vt-v1runs-h">Voyager 1 runs</h2>
+          <button type="button" class="tip" aria-label="About Voyager 1 runs" title="A batch is the list of transects the driver builds one after another; a turn is one transect with its videos. A flush ends a turn's build, gives its videos back to the Archive, deletes its Workbench folder and, if you choose, puts the turn at the end of the queue. The driver does the work and records who asked."><span>i</span></button>
+        </div>
+        <p class="vt-line vt-v1-batch" data-vt="v1-batch"></p>
+        <p class="count vt-line" data-vt="v1-limit"></p>
+        <div class="vt-table-wrap vt-keep">
+          <table class="vt-table vt-v1-table" data-vt="v1-table">
+            <thead>
+              <tr>
+                <th scope="col" class="vt-num">Turn</th>
+                <th scope="col">Transect and videos</th>
+                <th scope="col">Status</th>
+                <th scope="col">Current video</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody data-vt="v1-body"></tbody>
+          </table>
+        </div>
+        <p class="count vt-line" data-vt="v1-empty" hidden></p>
+        <div class="actions">
+          <button type="button" class="btn" data-vt="v1-refresh">Refresh</button>
+        </div>
+
+        <section class="vt-fieldset vt-v1-flush" data-vt="v1-flush" aria-labelledby="vt-v1-flush-h" hidden>
+          <h3 class="vt-v1-sub" id="vt-v1-flush-h" data-vt="v1-flush-title">Flush</h3>
+          <div class="vt-plan" data-vt="v1-preview" aria-live="polite"></div>
+          <dl class="choices">
+            <div>
+              <dt><span class="vt-dt-flow"><label for="vt-v1-initials">Initials</label>
+                  <button type="button" class="tip" aria-label="About the flush initials" title="Type the two to four letters that sign this flush. VICARIUS starts them on the initials you signed in with and the driver records them with the reason."><span>?</span></button></span></dt>
+              <dd><input type="text" id="vt-v1-initials" class="w-initials" maxlength="4" autocomplete="off" spellcheck="false" data-vt="v1-initials"></dd>
+            </div>
+            <div>
+              <dt><span class="vt-dt-flow"><label for="vt-v1-reason">Reason</label>
+                  <button type="button" class="tip" aria-label="About the flush reason" title="Type why this transect is flushed, for example that the build hung. The driver keeps the sentence with the turn and in its log, and the flush is refused without one."><span>?</span></button></span></dt>
+              <dd><input type="text" id="vt-v1-reason" class="vt-field vt-reason" maxlength="2000" autocomplete="off" data-vt="v1-reason"></dd>
+            </div>
+            <div>
+              <dt><span class="vt-dt-flow"><span id="vt-v1-requeue-l">Queue</span>
+                  <button type="button" class="tip" aria-label="About putting the turn back" title="Tick this to add a fresh copy of the transect at the end of the queue; it is ticked by default. The flushed turn stays in the list as flushed, and an unticked box leaves the transect for a later batch."><span>?</span></button></span></dt>
+              <dd role="group" aria-labelledby="vt-v1-requeue-l"><label class="opt"><input type="checkbox" data-vt="v1-requeue" checked> Put it back at the end of the queue</label></dd>
+            </div>
+            <div>
+              <dt><span class="vt-dt-flow"><span id="vt-v1-resume-l">Afterwards</span>
+                  <button type="button" class="tip" aria-label="About carrying on" title="Tick this to start the next pending transect as soon as the flush finishes; it is ticked by default. An unticked box leaves the batch paused for you to resume."><span>?</span></button></span></dt>
+              <dd role="group" aria-labelledby="vt-v1-resume-l"><label class="opt"><input type="checkbox" data-vt="v1-resume" checked> Carry on with the next transect</label></dd>
+            </div>
+          </dl>
+          <div class="actions">
+            <button type="button" class="btn btn-danger" data-vt="v1-flush-go" title="Flush this transect after a last confirmation. The driver ends its build, returns its videos to the Archive and deletes its Workbench folder; this cannot be undone." disabled>Flush this transect</button>
+            <button type="button" class="btn" data-vt="v1-flush-cancel" title="Close the preview without flushing. Nothing changes.">Cancel</button>
+          </div>
+        </section>
+
+        <fieldset class="vt-fieldset vt-v1-shelf">
+          <legend>Shelf folder of this batch <button type="button" class="tip" aria-label="About the batch Shelf" title="The Shelf is the NAS folder each finished transect is deposited into. A change applies to the turns of this batch not yet deposited, and the driver refuses it while a deposit is in progress."><span>i</span></button></legend>
+          <dl class="choices">
+            <div>
+              <dt><span class="vt-dt-flow"><label for="vt-v1-shelf">Shelf folder</label>
+                  <button type="button" class="tip" aria-label="About the Shelf folder" title="Type the absolute NAS folder deposits go into, for example under /volume5/Archive10_20TB. The field starts on the batch's current Shelf, and the driver creates the run folder inside it before a deposit."><span>?</span></button></span></dt>
+              <dd><input type="text" id="vt-v1-shelf" class="vt-field w-path" maxlength="1024" autocomplete="off" spellcheck="false" data-vt="v1-shelf"></dd>
+            </div>
+            <div>
+              <dt><span class="vt-dt-flow"><label for="vt-v1-shelf-initials">Initials</label>
+                  <button type="button" class="tip" aria-label="About the Shelf change initials" title="Type the two to four letters that sign this change. VICARIUS starts them on the initials you signed in with."><span>?</span></button></span></dt>
+              <dd><input type="text" id="vt-v1-shelf-initials" class="w-initials" maxlength="4" autocomplete="off" spellcheck="false" data-vt="v1-shelf-initials"></dd>
+            </div>
+            <div>
+              <dt><span class="vt-dt-flow"><label for="vt-v1-shelf-reason">Reason</label>
+                  <button type="button" class="tip" aria-label="About the Shelf change reason" title="Type why the Shelf changes, for example that the old drive is nearly full. The driver records the sentence as an operator action."><span>?</span></button></span></dt>
+              <dd><input type="text" id="vt-v1-shelf-reason" class="vt-field vt-reason" maxlength="2000" autocomplete="off" data-vt="v1-shelf-reason"></dd>
+            </div>
+          </dl>
+          <div class="actions">
+            <button type="button" class="btn btn-primary" data-vt="v1-shelf-go" title="Change the Shelf folder after a confirmation. The driver checks the folder and records the change; transects already deposited stay where they are.">Change the Shelf</button>
+          </div>
+        </fieldset>
+        <p class="result" data-vt="v1-result" role="status"></p>
+      </section>
