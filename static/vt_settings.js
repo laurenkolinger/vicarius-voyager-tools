@@ -58,7 +58,7 @@
   var LINE_NO_SAVE = "No save recorded in the settings history yet.";
   var LINE_NOTHING = "Nothing changed.";
   var LINE_DRIVER_OFF = "The driver is not running; its batches read the new floors when it starts.";
-  var LINE_RESTART_CHIP = "Driver batches use the new floors after the driver restarts";
+  var LINE_RESTART_CHIP = "The driver uses the new floors or Shelf folder after it restarts";
   var LINE_NO_EDITOR_TIER = "The ladder file does not list the manual edit window tier yet.";
   var LINE_DRIFT_REASON = "Type a reason before recording the change as found.";
   var LINE_ARCHIVE = "Archive the Shelf copy: before each upload the Shelf folder is renamed to <folder>_voy1_archive, or a name with the edit round when an earlier archive holds that one, and kept.";
