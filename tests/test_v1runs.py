@@ -175,7 +175,7 @@ class Flags(unittest.TestCase):
 class Actions(unittest.TestCase):
     def test_each_status(self):
         expected = {
-            "running": (True, False), "paused": (True, False), "error": (True, False), "stopped": (True, False),
+            "running": (True, False), "paused": (True, False), "error": (False, False), "stopped": (False, False),
             "done": (False, False), "scrapped": (False, False), "flushed": (False, False),
             "pending": (False, True), "weird": (False, False), "": (False, False),
         }

@@ -35,21 +35,18 @@ CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f  ]")
 STATUS_PENDING = "pending"
 STATUS_RUNNING = "running"
 STATUS_PAUSED = "paused"
-STATUS_ERROR = "error"
-STATUS_STOPPED = "stopped"
 STATUS_DONE = "done"
 STATUS_SCRAPPED = "scrapped"
 STATUS_FLUSHED = "flushed"
-# A turn the operator may flush: the build started and did not finish, was not given up.
-FLUSHABLE_STATUSES = (STATUS_RUNNING, STATUS_PAUSED, STATUS_ERROR, STATUS_STOPPED)
+# A turn the operator may flush: its build started and did not finish, and it was not given up.
+# The driver gives a turn no "error" or "stopped" status; those are batch statuses.
+FLUSHABLE_STATUSES = (STATUS_RUNNING, STATUS_PAUSED)
 
 # The chip colour of a status, on the eight-role vocabulary of the matrix window design.
 STATUS_ROLES = {
     STATUS_PENDING: "role-planned",
     STATUS_RUNNING: "role-in-progress",
     STATUS_PAUSED: "role-attention",
-    STATUS_STOPPED: "role-attention",
-    STATUS_ERROR: "role-failed",
     STATUS_DONE: "role-verified",
     STATUS_SCRAPPED: "role-empty",
     STATUS_FLUSHED: "role-empty",

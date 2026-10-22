@@ -278,10 +278,8 @@ class Gates(ToolsCase):
         self.assertEqual(page.count('role="tab"'), len(ALL_TABS))
         self.assertEqual(page.count('role="tabpanel"'), len(ALL_TABS))
         self.assertNotIn("UVI", page)
-        # The cache-bust literal is hand-written in panel.html (data-vt-version)
-        # as well as read from views.ASSET_VERSION; the two must move together
-        # or the desktop path (which reads data-vt-version, not the Python
-        # constant, to version the injected stylesheet) serves a stale asset.
+        # panel.html renders data-vt-version from views.ASSET_VERSION; the desktop
+        # path reads data-vt-version to version the injected stylesheet.
         self.assertIn('data-vt-version="' + views.ASSET_VERSION + '"', page)
         r = self.client.get("/voyager-tools/fragment")
         self.assertEqual(r.status_code, 200)
