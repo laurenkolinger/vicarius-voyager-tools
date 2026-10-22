@@ -191,8 +191,9 @@
 
   function setResult(el, text, kind) {
     if (!el) return;
-    el.classList.remove("result-error", "is-warn");
-    if (kind === "error") el.classList.add("result-error");
+    el.classList.remove("result-error", "is-warn", "is-info");
+    if (kind === "info") el.classList.add("is-info");
+    else if (kind === "error") el.classList.add("result-error");
     else if (kind === "warn") el.classList.add("is-warn");
     el.innerHTML = text || "";
   }
@@ -255,7 +256,7 @@
           return { ok: r.ok, status: r.status, data: data };
         });
       }).catch(function (err) {
-        if (err && err.name === "AbortError") return { ok: false, status: 0, data: { error: timeoutLine(limitMs) } };
+        if (err && err.name === "AbortError") return { ok: false, status: 0, timedOut: true, data: { error: timeoutLine(limitMs) } };
         return { ok: false, status: 0, data: { error: "The request did not reach VICARIUS: " + err } };
       }).then(function (res) {
         if (timer !== null) clearTimeout(timer);

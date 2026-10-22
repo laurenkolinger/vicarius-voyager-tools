@@ -79,6 +79,13 @@ class BatchLine(unittest.TestCase):
         self.assertEqual(model_of([turn(1, "BIT_T1", "pending")], time_limit_hours=8)["batch"]["time_limit_hours"], 8.0)
         self.assertIsNone(model_of([turn(1, "BIT_T1", "pending")])["batch"]["time_limit_hours"])
 
+    def test_the_top_level_limit_wins_for_the_batch_line_and_shows_on_a_paused_batch(self):
+        paused = model_of([turn(1, "BIT_T1", "paused", time_limit_hours=7)], top={"time_limit_hours": 11}, status="paused")
+        self.assertEqual(paused["batch"]["time_limit_hours"], 11.0)
+        self.assertEqual(paused["turns"][0]["limit_hours"], 7.0)  # a turn's own limit still rules its own row
+        only_top = model_of([turn(1, "BIT_T1", "paused")], top={"time_limit_hours": 11}, status="paused")
+        self.assertEqual((only_top["batch"]["time_limit_hours"], only_top["turns"][0]["limit_hours"]), (11.0, 11.0))
+
     def test_no_batch(self):
         for status in (None, {}, {"batch": None}, {"batch": {}}, [], "x", 5):
             with self.subTest(status=status):
@@ -181,8 +188,20 @@ class Actions(unittest.TestCase):
         }
         for status, (flush, move) in expected.items():
             with self.subTest(status=status):
-                row = model_of([turn(1, "BIT_T1", status)])["turns"][0]
+                row = model_of([turn(1, "BIT_T1", status)], status="paused")["turns"][0]
                 self.assertEqual((row["actions"]["flush"], row["actions"]["move"]), (flush, move))
+
+    def test_move_only_while_the_batch_is_idle_or_paused(self):
+        for batch_status, movable in (("idle", True), ("paused", True), ("running", False), ("error", False),
+                                      ("stopped", False), ("", False), ("weird", False)):
+            with self.subTest(batch=batch_status):
+                model = model_of([turn(1, "BIT_T1", "pending"), turn(2, "BIT_T2", "pending")], status=batch_status)
+                self.assertEqual([r["actions"]["move"] for r in model["turns"]], [movable, movable])
+                self.assertEqual(model["batch"]["move_note"], "" if movable else v1runs.MOVE_NOTE)
+
+    def test_no_move_note_when_nothing_is_pending(self):
+        self.assertEqual(model_of([turn(1, "BIT_T1", "running")], status="running")["batch"]["move_note"], "")
+        self.assertEqual(v1runs.MOVE_NOTE, "The queue can be reordered while the batch is paused.")
 
     def test_status_roles_cover_every_known_status(self):
         for status in v1runs.STATUS_ROLES:

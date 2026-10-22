@@ -61,7 +61,7 @@ _Avoid_: reset, scrap (scrap gives up a whole paused batch), delete
 The most hours the driver lets one video be built for (11 hours); the line on the pane says so and nothing on the pane changes it.
 
 **Build process gone**:
-A turn the driver lists as running while it reports no live build process for it. Flush clears it.
+A turn the driver lists as running while the turn's own build process (the Metashape run the driver started for that turn) is no longer alive. The driver reports it per turn as `job_alive`; a driver that sends none leaves the pane to read the engine's state instead. Flush clears it.
 
 **Batch Shelf**:
 The NAS folder the running batch deposits finished transects into. The pane changes it for the turns not yet deposited; transects already on the Shelf stay where they are.

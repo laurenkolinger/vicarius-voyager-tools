@@ -38,7 +38,9 @@ WRITE_TIMEOUT_S = 600
 # hundred GB; it can take minutes, so it has its own limit.
 FLUSH_TIMEOUT_S = 900
 MAX_RESPONSE_BYTES = 16 * 1024 * 1024
-MAX_REASON_CHARS = 2000
+# The driver refuses a flush or Shelf change reason longer than this (driver/flush.py REASON_MAX_CHARS); the
+# panel routes and the pane inputs use the same number.
+MAX_REASON_CHARS = 300
 MAX_PATH_CHARS = 1024
 # The driver's own refusals and malformed-body answers, relayed with their status.
 RELAYED_STATUSES = (400, 404, 409)

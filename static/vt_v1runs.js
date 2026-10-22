@@ -27,7 +27,15 @@
   var LINE_REASON = "Type the reason first.";
   var LINE_SHELF = "Type the Shelf folder first.";
   var LINE_NOT_PICKED = "Pick a turn to flush first.";
-  var FLUSH_TIMEOUT_MS = 900000; // same as FLUSH_TIMEOUT_S in voyagertools/driver_client.py
+  // Each browser limit is the panel server's driver limit (voyagertools/driver_client.py) plus a margin, so the
+  // server's own answer (a 502 sentence) arrives before the browser gives up.
+  var MARGIN_MS = 30000;
+  var FLUSH_TIMEOUT_MS = 900000 + MARGIN_MS;  // FLUSH_TIMEOUT_S 900
+  var PREVIEW_TIMEOUT_MS = 120000 + MARGIN_MS; // PREVIEW_TIMEOUT_S 120
+  var SHELF_TIMEOUT_MS = 600000 + MARGIN_MS;   // WRITE_TIMEOUT_S 600
+  var STATUS_BAD_REQUEST = 400, STATUS_NOT_FOUND = 404, STATUS_CONFLICT = 409, STATUS_LOCKED = 423;
+  var TRIGGER_TIME_LIMIT = "time_limit";
+  var LINE_NO_CARRY_ON = "The batch did not carry on; press Resume when ready.";
   var FLAG_OVER = "over the limit";
   var FLAG_GONE = "build process gone";
 
@@ -130,14 +138,52 @@
     return "The Shelf is now " + (a.shelf_root || "not reported") + " " + tail;
   }
 
-  // timeoutLine(turnId, model): what the driver's status shows for the turn after the flush call got no answer.
-  function timeoutLine(turnId, model) {
+  // refusedAnswer(res): true for the answers that are the driver's or the panel's own definite refusal
+  // (a bad request, an unknown turn, a conflict, a lock): the flush did not start, so the sentence is shown as it is.
+  function refusedAnswer(res) {
+    var code = res && res.status;
+    return code === STATUS_BAD_REQUEST || code === STATUS_NOT_FOUND || code === STATUS_CONFLICT || code === STATUS_LOCKED;
+  }
+
+  // causeOf(res): "timeout" (no answer within the browser limit), "unreachable" (the desktop was never reached)
+  // or "error" (an answer that says the call failed, such as a 502).
+  function causeOf(res) {
+    if (res && res.status === 0) return res.timedOut ? "timeout" : "unreachable";
+    return "error";
+  }
+
+  // timeoutLine(turnId, model, cause, detail): what the driver's status shows for the turn after the flush call
+  // was not confirmed. cause is "timeout" (default), "unreachable" or "error"; detail is the sentence of an error.
+  function timeoutLine(turnId, model, cause, detail) {
     var turns = model && Array.isArray(model.turns) ? model.turns : [];
     var turn = turns.filter(function (t) { return String(t.id) === String(turnId); })[0];
-    var head = "The flush of turn " + turnId + " got no answer within 15 minutes. ";
+    var head;
+    if (cause === "unreachable") head = "The desktop could not be reached, so the flush of turn " + turnId + " may not have started. ";
+    else if (cause === "error") head = "The flush of turn " + turnId + " was not confirmed" + (detail ? ": " + String(detail).replace(/[.\s]+$/, "") : "") + ". ";
+    else head = "The flush of turn " + turnId + " got no answer within 15 minutes. ";
     if (!turn) return head + "The driver no longer lists the turn.";
     if (turn.status === "flushed") return head + "The driver shows turn " + turnId + " as flushed.";
     return head + "The driver shows turn " + turnId + " as " + turn.status + "; the flush may still be running, so press Refresh to read it again.";
+  }
+
+  // queueWords(order, turns): "7, 8, 9, 11, 12, 13, 10": the pending turns of the driver's order, in that order.
+  // turns are the pane's rows as they were before the move; a turn that was not pending is left out.
+  function queueWords(order, turns) {
+    var pending = {};
+    (Array.isArray(turns) ? turns : []).forEach(function (t) { if (t && t.status === "pending") pending[String(t.id)] = true; });
+    var ids = (Array.isArray(order) ? order : []).filter(function (id) { return pending[String(id)]; });
+    return ids.length ? ids.join(", ") : "empty";
+  }
+
+  // flushDoneLines(d, turnId, carryOn): the sentences after a flush: what was flushed, and, when the batch was
+  // asked to carry on and the driver says it did not, one more line (the driver's own reason when it sends one).
+  function flushDoneLines(d, turnId, carryOn) {
+    var a = d && typeof d === "object" ? d : {};
+    var main = "Turn " + turnId + " flushed. " + plural(a.rows_restored || 0, "video") + " back in the Archive, " +
+      gigabytes(a.reclaimed_bytes) + " deleted" + (a.requeued_as ? ", put back as turn " + a.requeued_as : "") + ".";
+    var why = typeof a.resume_reason === "string" ? a.resume_reason.trim() : "";
+    var extra = carryOn && a.resumed === false ? (why || LINE_NO_CARRY_ON) : "";
+    return { text: [main, extra].filter(Boolean).join(" "), warn: !!extra };
   }
 
   function previewHtml(items) {
@@ -166,11 +212,14 @@
     return flags.map(function (f) { return '<span class="vt-v1-flag">' + f + "</span>"; }).join("");
   }
 
-  // flushedLine(f): who flushed, when, why and where it was put back, as full sentences.
+  // flushedLine(f): who flushed (or that the time limit did), when, why and where it was put back, as full
+  // sentences. The reason starts a sentence, so its first letter is a capital.
   function flushedLine(f) {
     if (!f) return "";
-    var who = f.by ? "Flushed by " + f.by + (f.at ? ", " + f.at : "") + "." : (f.at ? "Flushed " + f.at + "." : "");
+    var by = f.trigger === TRIGGER_TIME_LIMIT ? "automatically" : (f.by ? "by " + f.by : "");
+    var who = by ? "Flushed " + by + (f.at ? ", " + f.at : "") + "." : (f.at ? "Flushed " + f.at + "." : "");
     var reason = f.reason ? String(f.reason).trim() : "";
+    reason = reason.charAt(0).toUpperCase() + reason.slice(1);
     if (reason && !/[.!?]$/.test(reason)) reason += ".";
     var requeued = f.requeued_as ? "Put back as turn " + f.requeued_as + "." : "";
     return [who, reason, requeued].filter(Boolean).join(" ");
@@ -223,15 +272,16 @@
 
   function batchHtml(batch) {
     if (!batch) return "";
+    var note = batch.move_note ? '<span class="vt-v1-shelf-line">' + esc(batch.move_note) + "</span>" : "";
     return chip(batch.batch_id || "unknown batch") + " " + stateHtml(batch.role, batch.status) +
-      '<span class="vt-v1-shelf-line">Shelf folder ' + chip(batch.shelf_root || "not reported") + "</span>";
+      '<span class="vt-v1-shelf-line">Shelf folder ' + chip(batch.shelf_root || "not reported") + "</span>" + note;
   }
 
   function limitLine(batch) {
     return batch && batch.time_limit_hours ? "Videos over " + hoursWords(batch.time_limit_hours).replace(" h", " hours") + " are flushed automatically." : "";
   }
 
-  var helpers = { shelfWords: shelfWords, flushedLine: flushedLine, timeoutLine: timeoutLine, esc: esc, hoursWords: hoursWords, gigabytes: gigabytes, previewItems: previewItems, previewHtml: previewHtml,
+  var helpers = { queueWords: queueWords, flushDoneLines: flushDoneLines, refusedAnswer: refusedAnswer, causeOf: causeOf, shelfWords: shelfWords, flushedLine: flushedLine, timeoutLine: timeoutLine, esc: esc, hoursWords: hoursWords, gigabytes: gigabytes, previewItems: previewItems, previewHtml: previewHtml,
                   moveTarget: moveTarget, initialsSeed: initialsSeed, flushBody: flushBody, rowHtml: rowHtml,
                   batchHtml: batchHtml, limitLine: limitLine, INITIALS_RE: INITIALS_RE };
   if (typeof module === "object" && module && module.exports) module.exports = helpers;
@@ -351,7 +401,7 @@
       el.flush.hidden = false;
       seedInitials();
       ctx.setResult(el.result, "");
-      ctx.api("/api/v1runs/flush-preview?turn=" + encodeURIComponent(turn.id)).then(function (res) {
+      ctx.api("/api/v1runs/flush-preview?turn=" + encodeURIComponent(turn.id), { timeoutMs: PREVIEW_TIMEOUT_MS }).then(function (res) {
         if (st.picked !== turn.id) return;
         if (!res.ok) { el.preview.innerHTML = ""; ctx.fail(el.result, res); return; }
         var items = previewItems(res.data);
@@ -384,29 +434,29 @@
 
     // runFlush(turn, who, reason): the POST, with its own 15 minute limit; the form stays shut until the driver answers.
     function runFlush(turn, who, reason) {
-      var body = flushBody({ turn: turn.id, initials: who, reason: reason, requeue: el.requeue.checked, resume: el.resume.checked });
+      var flushCarryOn = el.resume.checked;
+      var body = flushBody({ turn: turn.id, initials: who, reason: reason, requeue: el.requeue.checked, resume: flushCarryOn });
       setFlushing(true);
-      ctx.setResult(el.result, esc("Flushing turn " + turn.id + ": ending the build, putting the videos back on their Archive record and deleting the Workbench copy."));
+      ctx.setResult(el.result, esc("Flushing turn " + turn.id + ": ending the build, putting the videos back on their Archive record and deleting the Workbench copy."), "info");
       if (el.result.scrollIntoView) el.result.scrollIntoView({ block: "nearest" });
       ctx.api("/api/v1runs/flush", { method: "POST", body: body, timeoutMs: FLUSH_TIMEOUT_MS }).then(function (res) {
-        if (res.status === 0) { setFlushing(false); readAfterTimeout(turn); return; }
         setFlushing(false);
-        if (!res.ok) { el.go.disabled = false; ctx.fail(el.result, res); return; }
-        var d = res.data || {};
-        ctx.setResult(el.result, esc("Turn " + turn.id + " flushed. " + plural(d.rows_restored || 0, "video") + " back in the Archive, " +
-          gigabytes(d.reclaimed_bytes) + " deleted" + (d.requeued_as ? ", put back as turn " + d.requeued_as : "") + "."));
+        if (!res.ok && refusedAnswer(res)) { el.go.disabled = false; ctx.fail(el.result, res); return; }
+        if (!res.ok) { readAfterTimeout(turn, causeOf(res), (res.data || {}).error); return; }
+        var done = flushDoneLines(res.data, turn.id, flushCarryOn);
+        ctx.setResult(el.result, esc(done.text), done.warn ? "warn" : "");
         closeFlush();
         load();
       });
     }
 
-    // readAfterTimeout(turn): the call got no answer; the driver's status says what became of the turn.
-    function readAfterTimeout(turn) {
+    // readAfterTimeout(turn, cause, detail): the call was not confirmed; the driver's status says what became of the turn.
+    function readAfterTimeout(turn, cause, detail) {
       closeFlush();
       ctx.api("/api/v1runs").then(function (res) {
         if (!res.ok) { ctx.fail(el.result, res); return; }
         render(res.data);
-        ctx.setResult(el.result, esc(timeoutLine(turn.id, res.data)), "error");
+        ctx.setResult(el.result, esc(timeoutLine(turn.id, res.data, cause, detail)), "error");
       });
     }
 
@@ -416,9 +466,10 @@
       var who = signer();
       if (to === null) return;
       if (!who) { ctx.setResult(el.result, esc(LINE_INITIALS_PANEL), "error"); return; }
+      var before = st.turns.slice();
       ctx.api("/api/v1runs/move", { method: "POST", body: { turn_id: turn.id, to: to, initials: who } }).then(function (res) {
         if (!res.ok) { ctx.fail(el.result, res); return; }
-        ctx.setResult(el.result, esc("Turn " + turn.id + " moved. The queue is now " + (res.data.order || []).join(", ") + "."));
+        ctx.setResult(el.result, esc("Turn " + turn.id + " moved. The queue is now " + queueWords(res.data.order, before) + "."));
         load();
       });
     }
@@ -438,7 +489,7 @@
         st.confirming = false;
         if (!ok) { el.shelfGo.disabled = false; return; }
         ctx.busy(el.shelfGo, true);
-        ctx.api("/api/v1runs/shelf", { method: "POST", body: { shelf_root: shelf, initials: who, reason: reason, confirm: true } }).then(function (res) {
+        ctx.api("/api/v1runs/shelf", { method: "POST", body: { shelf_root: shelf, initials: who, reason: reason, confirm: true }, timeoutMs: SHELF_TIMEOUT_MS }).then(function (res) {
           ctx.busy(el.shelfGo, false);
           if (!res.ok) { ctx.fail(el.result, res); return; }
           el.shelfReason.value = "";

@@ -149,12 +149,12 @@ class Helpers(unittest.TestCase):
     def test_flushed_row_names_who_when_and_why(self):
         out = run_node("return h.rowHtml(" + json.dumps(row(status="flushed", actions={"flush": False, "move": False},
               flushed={"by": "LO", "at": "2026-10-21 19:02 AST", "reason": "hung", "requeued_as": 10})) + ");")
-        self.assertIn("Flushed by LO, 2026-10-21 19:02 AST. hung. Put back as turn 10.", out)
+        self.assertIn("Flushed by LO, 2026-10-21 19:02 AST. Hung. Put back as turn 10.", out)
 
     def test_a_reason_without_a_full_stop_gets_one_before_the_put_back_sentence(self):
         flushed = lambda reason: {"by": "LO", "at": "t", "reason": reason, "requeued_as": 10}
-        for reason, expected in (("hung", "hung. Put back"), ("hung.", "hung. Put back"), ("hung?", "hung? Put back"),
-                                 ("  hung  ", "hung. Put back")):
+        for reason, expected in (("hung", "Hung. Put back"), ("hung.", "Hung. Put back"), ("hung?", "Hung? Put back"),
+                                 ("  hung  ", "Hung. Put back")):
             with self.subTest(reason=reason):
                 line = run_node("return h.flushedLine(" + json.dumps(flushed(reason)) + ");")
                 self.assertIn(expected, line)
@@ -169,6 +169,66 @@ class Helpers(unittest.TestCase):
         self.assertIn('colspan="4"', out)
         plain = run_node("return h.rowHtml(" + json.dumps(row()) + ");")
         self.assertEqual(plain.count("<tr"), 1)
+
+    def test_who_flushed_reads_automatically_for_the_time_limit(self):
+        said = lambda f: run_node("return h.flushedLine(" + json.dumps(f) + ");")
+        self.assertEqual(said({"by": "driver", "at": "2026-10-21 19:02 AST", "reason": "over 11 hours", "trigger": "time_limit"}),
+                         "Flushed automatically, 2026-10-21 19:02 AST. Over 11 hours.")
+        self.assertEqual(said({"by": "LO", "at": "t", "reason": "hung", "trigger": "operator"}), "Flushed by LO, t. Hung.")
+        self.assertEqual(said({"by": "LO", "reason": "hung"}), "Flushed by LO. Hung.")
+        self.assertEqual(said({"trigger": "time_limit"}), "Flushed automatically.")
+        self.assertEqual(said({"at": "t", "reason": "", "trigger": "operator"}), "Flushed t.")
+
+    def test_the_move_answer_lists_only_the_pending_turns(self):
+        turns = [{"id": 6, "status": "running"}, {"id": 7, "status": "pending"}, {"id": 8, "status": "pending"},
+                 {"id": 9, "status": "done"}, {"id": 10, "status": "pending"}, {"id": 11, "status": "flushed"}]
+        said = lambda order, t=turns: run_node("return h.queueWords(" + json.dumps(order) + ", " + json.dumps(t) + ");")
+        self.assertEqual(said([6, 8, 9, 10, 11, 7]), "8, 10, 7")
+        self.assertEqual(said([6, 9, 11]), "empty")
+        self.assertEqual(said(None), "empty")
+        self.assertEqual(said([7, 8], None), "empty")
+
+    def test_the_flush_answer_says_when_the_batch_did_not_carry_on(self):
+        said = lambda d, carry: run_node("return h.flushDoneLines(" + json.dumps(d) + ", 6, " + json.dumps(carry) + ");")
+        base = {"rows_restored": 4, "reclaimed_bytes": 3.8e11, "requeued_as": 10}
+        main = "Turn 6 flushed. 4 videos back in the Archive, 380 GB deleted, put back as turn 10."
+        self.assertEqual(said(dict(base, resumed=False), True), {"text": main + " The batch did not carry on; press Resume when ready.", "warn": True})
+        self.assertEqual(said(dict(base, resumed=True), True), {"text": main, "warn": False})
+        self.assertEqual(said(dict(base, resumed=False), False), {"text": main, "warn": False})
+        self.assertEqual(said(base, True), {"text": main, "warn": False})  # no resumed key: nothing claimed
+        reason = dict(base, resumed=False, resume_reason="Turn 7 is held by manual edit.")
+        self.assertEqual(said(reason, True), {"text": main + " Turn 7 is held by manual edit.", "warn": True})
+        self.assertEqual(said(None, True)["warn"], False)
+
+    def test_a_failed_flush_call_is_read_back_unless_it_is_a_plain_refusal(self):
+        refused = lambda code: run_node("return h.refusedAnswer({status: %d});" % code)
+        for code in (400, 404, 409, 423):
+            self.assertTrue(refused(code), code)
+        for code in (0, 500, 502, 503, 504):
+            self.assertFalse(refused(code), code)
+        self.assertEqual(run_node("return h.causeOf({status: 0, timedOut: true});"), "timeout")
+        self.assertEqual(run_node("return h.causeOf({status: 0});"), "unreachable")
+        self.assertEqual(run_node("return h.causeOf({status: 502});"), "error")
+
+    def test_the_read_back_sentence_names_the_cause(self):
+        model = {"turns": [{"id": 6, "status": "running"}]}
+        said = lambda cause, detail="": run_node("return h.timeoutLine(6, " + json.dumps(model) + ", " + json.dumps(cause) + ", " + json.dumps(detail) + ");")
+        self.assertTrue(said("timeout").startswith("The flush of turn 6 got no answer within 15 minutes. "))
+        unreachable = said("unreachable")
+        self.assertTrue(unreachable.startswith("The desktop could not be reached, so the flush of turn 6 may not have started. "))
+        self.assertNotIn("15 minutes", unreachable)
+        error = said("error", "The driver on port 5093 did not answer: Connection refused.")
+        self.assertTrue(error.startswith("The flush of turn 6 was not confirmed: The driver on port 5093 did not answer: Connection refused. The driver shows"), error)
+        self.assertNotIn("..", error)
+        self.assertTrue(said("error").startswith("The flush of turn 6 was not confirmed. "))
+
+    def test_the_batch_line_says_when_the_queue_can_be_reordered(self):
+        batch = {"batch_id": "b", "status": "running", "role": "role-in-progress", "shelf_root": "/s",
+                 "move_note": "The queue can be reordered while the batch is paused."}
+        self.assertIn("The queue can be reordered while the batch is paused.", run_node("return h.batchHtml(" + json.dumps(batch) + ");"))
+        self.assertNotIn("reordered", run_node("return h.batchHtml(" + json.dumps(dict(batch, move_note="")) + ");"))
+        hostile = run_node("return h.batchHtml(" + json.dumps(dict(batch, move_note=HOSTILE)) + ");")
+        self.assertNotIn("<img", hostile)
 
     def test_the_shelf_sentence_lists_the_turns(self):
         cases = [
@@ -363,15 +423,57 @@ class StaticGuards(unittest.TestCase):
         self.assertNotIn("**Space floors**", scanned[-2])
 
     def test_flush_has_its_own_long_timeout_and_a_shut_form_while_it_runs(self):
-        self.assertRegex(self.js, r"FLUSH_TIMEOUT_MS = 900000")
+        self.assertRegex(self.js, r"FLUSH_TIMEOUT_MS = 900000 \+ MARGIN_MS")
         self.assertRegex(self.js, r'"/api/v1runs/flush", \{ method: "POST", body: body, timeoutMs: FLUSH_TIMEOUT_MS \}')
         self.assertIn("Flushing turn \" + turn.id + \": ending the build, putting the videos back on their Archive record and deleting the Workbench copy.", self.js)
         self.assertIn("function setFlushing(on)", self.js)
-        self.assertIn("if (res.status === 0) { setFlushing(false); readAfterTimeout(turn); return; }", self.js)
+        self.assertIn("if (!res.ok && refusedAnswer(res))", self.js)
+        self.assertIn("readAfterTimeout(turn, causeOf(res), (res.data || {}).error)", self.js)
         driver = (CLONE / "static" / "voyager_tools.js").read_text(encoding="utf-8")
         self.assertIn("opts.timeoutMs", driver)
         self.assertIn("}, limitMs);", driver)
         self.assertNotIn("}, REQUEST_TIMEOUT_MS);", driver)
+
+    def test_browser_limits_are_the_server_limits_plus_thirty_seconds(self):
+        from voyagertools import driver_client as dc
+        values = dict(re.findall(r"var (\w+_MS) = (\d+)(?: \+ MARGIN_MS)?;", self.js))
+        self.assertEqual(int(re.search(r"var MARGIN_MS = (\d+);", self.js).group(1)), 30000)
+        for name, seconds in (("FLUSH_TIMEOUT_MS", dc.FLUSH_TIMEOUT_S), ("PREVIEW_TIMEOUT_MS", dc.PREVIEW_TIMEOUT_S),
+                              ("SHELF_TIMEOUT_MS", dc.WRITE_TIMEOUT_S)):
+            self.assertEqual(int(values[name]), seconds * 1000, name)
+        self.assertIn('flush-preview?turn=" + encodeURIComponent(turn.id), { timeoutMs: PREVIEW_TIMEOUT_MS }', self.js)
+        self.assertIn("confirm: true }, timeoutMs: SHELF_TIMEOUT_MS }", self.js)
+
+    def test_the_desktop_api_marks_a_timeout_so_a_dead_network_is_told_apart(self):
+        driver = (CLONE / "static" / "voyager_tools.js").read_text(encoding="utf-8")
+        self.assertIn("status: 0, timedOut: true,", driver)
+
+    def test_reason_inputs_take_what_the_driver_takes(self):
+        from voyagertools import driver_client as dc
+        self.assertEqual(dc.MAX_REASON_CHARS, 300)
+        limits = re.findall(r'id="vt-v1(?:-shelf)?-reason"[^>]*maxlength="(\d+)"', self.tpl)
+        self.assertEqual(limits, [str(dc.MAX_REASON_CHARS)] * 2)
+
+    def test_the_in_flight_flush_line_is_neutral_not_the_success_style(self):
+        self.assertRegex(self.js, r'Workbench copy\."\), "info"\)')
+        driver = (CLONE / "static" / "voyager_tools.js").read_text(encoding="utf-8")
+        self.assertIn('kind === "info"', driver)
+        css = (CLONE / "static" / "voyager_tools.css").read_text(encoding="utf-8")
+        self.assertIn(".voyager-tools .result.is-info", css)
+
+    def test_long_paths_in_the_preview_wrap_inside_it(self):
+        css = (CLONE / "static" / "voyager_tools.css").read_text(encoding="utf-8")
+        rule = re.search(r"\.vt-v1-prows \{[^}]*\}", css).group(0)
+        self.assertIn("overflow-wrap: anywhere", rule)
+        folder = re.search(r"\.vt-v1-flush \.vt-plan p\.count \{[^}]*\}", css).group(0)
+        self.assertIn("overflow-wrap: anywhere", folder)  # the Workbench folder sentence wraps too
+
+    def test_context_says_what_build_process_gone_measures(self):
+        text = (CLONE / "CONTEXT.md").read_text(encoding="utf-8")
+        entry = text[text.index("**Build process gone**"):]
+        entry = entry[:entry.index("**Batch Shelf**")]
+        self.assertIn("the turn's own build process", entry)
+        self.assertIn("job_alive", entry)
 
     def test_a_dialog_in_flight_disables_its_button_and_the_unused_busy_flag_is_gone(self):
         self.assertNotIn("busy: false", self.js)

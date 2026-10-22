@@ -16,7 +16,7 @@ Outputs: a plain dict the route serialises. Every text in it is stripped of
 
 Driver fields read (see the plan 2026-10-21-voyager1-flush-time-limit-shelf-move.md):
     status["batch"]: batch_id, run_id, status, shelf_root, initials, turns, time_limit_hours
-    status["engine_alive"], status["time_limit_hours"]
+    status["engine_alive"] (read only when a turn sends no job_alive), status["time_limit_hours"] (read first)
     turn: id, status, type, phase, select.ids, transect, flushed, job, job_alive,
           video_hours {readable_id: hours}, time_limit_hours
 """
@@ -41,6 +41,9 @@ STATUS_FLUSHED = "flushed"
 # A turn the operator may flush: its build started and did not finish, and it was not given up.
 # The driver gives a turn no "error" or "stopped" status; those are batch statuses.
 FLUSHABLE_STATUSES = (STATUS_RUNNING, STATUS_PAUSED)
+# The batch statuses in which the driver accepts a queue move (driver/state.py EDITABLE); it refuses one otherwise.
+MOVABLE_BATCH_STATUSES = ("idle", STATUS_PAUSED)
+MOVE_NOTE = "The queue can be reordered while the batch is paused."
 
 # The chip colour of a status, on the eight-role vocabulary of the matrix window design.
 STATUS_ROLES = {
@@ -148,10 +151,11 @@ def _build_gone(turn: Mapping, status: Mapping) -> bool:
     return status.get("engine_alive") is False
 
 
-def _actions(state: str, flushed: bool) -> dict:
-    """Which buttons apply: Flush for a started, unfinished, not given up turn; Move for a pending turn."""
+def _actions(state: str, flushed: bool, batch_status: str) -> dict:
+    """Which buttons apply: Flush for a started, unfinished, not given up turn; Move for a pending turn while
+    the batch is idle or paused (the driver refuses a move at any other time)."""
     return {"flush": state in FLUSHABLE_STATUSES and not flushed,
-            "move": state == STATUS_PENDING and not flushed}
+            "move": state == STATUS_PENDING and not flushed and batch_status in MOVABLE_BATCH_STATUSES}
 
 
 def turn_row(turn: Mapping, status: Mapping, batch: Mapping, site_name: Callable[[str], str]) -> dict:
@@ -190,17 +194,20 @@ def turn_row(turn: Mapping, status: Mapping, batch: Mapping, site_name: Callable
         "current_video": current, "current_hours": current_hours, "limit_hours": limit,
         "over_limit": bool(current_hours is not None and limit is not None and current_hours > limit),
         "build_gone": _build_gone(turn, status), "flushed": flushed,
-        "actions": _actions(state, flushed is not None),
+        "actions": _actions(state, flushed is not None, clean_text(batch.get("status"), 40)),
         "pending_index": None, "pending_count": 0,
     }
 
 
 def _batch_line(status: Mapping, batch: Mapping, rows: list[dict]) -> dict:
     """The batch part of the model: ids, status, Shelf folder and the time limit."""
-    limit = next((r["limit_hours"] for r in rows if r["limit_hours"] is not None), None)
+    # The top-level limit comes first: the driver sends it on every status, so a paused batch shows it too.
+    limit = _limit_for({}, status, batch)
     if limit is None:
-        limit = _limit_for({}, status, batch)
-    return {"batch_id": clean_text(batch.get("batch_id"), 80), "run_id": clean_text(batch.get("run_id"), 200),
+        limit = next((r["limit_hours"] for r in rows if r["limit_hours"] is not None), None)
+    waiting = any(r["status"] == STATUS_PENDING for r in rows)
+    movable = clean_text(batch.get("status"), 40) in MOVABLE_BATCH_STATUSES
+    return {"move_note": MOVE_NOTE if waiting and not movable else "", "batch_id": clean_text(batch.get("batch_id"), 80), "run_id": clean_text(batch.get("run_id"), 200),
             "status": clean_text(batch.get("status"), 40) or "unknown",
             "role": STATUS_ROLES.get(clean_text(batch.get("status"), 40), ROLE_UNKNOWN),
             "shelf_root": clean_text(batch.get("shelf_root"), 1024), "time_limit_hours": limit}

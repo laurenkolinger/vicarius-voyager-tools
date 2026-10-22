@@ -134,8 +134,15 @@ class Reads(RouteCase):
         first, second = body["turns"]
         self.assertTrue(first["over_limit"] and first["actions"]["flush"])
         self.assertEqual(second["site_name"], "Hind Bank East FSA")
-        self.assertTrue(second["actions"]["move"])
+        self.assertFalse(second["actions"]["move"])  # the batch runs: the driver would refuse a move
         self.assertEqual(self.fake.calls, [("status",)])
+
+    def test_a_paused_batch_offers_the_move(self):
+        paused = {"engine_alive": False, "batch": dict(STATUS["batch"], status="paused")}
+        self.fake.answers["status"] = paused
+        body = self.client.get("/voyager-tools/api/v1runs").get_json()
+        self.assertTrue(body["turns"][1]["actions"]["move"])
+        self.assertEqual(body["batch"]["move_note"], "")
 
     def test_a_status_with_no_batch(self):
         self.fake.answers["status"] = {"batch": None}
@@ -155,7 +162,7 @@ class Reads(RouteCase):
             with self.subTest(turn=value[:12]):
                 r = self.client.get("/voyager-tools/api/v1runs/flush-preview", query_string={"turn": value})
                 self.assertEqual(r.status_code, 400)
-                self.assertEqual(r.get_json()["error"], "turn must be a whole number of 1 or more.")
+                self.assertEqual(r.get_json()["error"], "Turn must be a whole number from 1 to 999999.")
                 body = dict(Flush.BODY, turn_id=value)
                 r = self.client.post("/voyager-tools/api/v1runs/flush", json=body)
                 self.assertEqual(r.status_code, 400)
@@ -174,13 +181,16 @@ class Reads(RouteCase):
             with self.subTest(query=query):
                 r = self.client.get("/voyager-tools/api/v1runs/flush-preview" + query)
                 self.assertEqual(r.status_code, 400)
-                self.assertEqual(r.get_json()["error"], "turn must be a whole number of 1 or more.")
+                self.assertEqual(r.get_json()["error"], "Turn must be a whole number from 1 to 999999.")
         self.assertEqual(self.fake.calls, [])
 
 
 class Flush(RouteCase):
     BODY = {"turn_id": 6, "initials": "lo", "reason": "Gap fill ran 11.6 hours.", "requeue": True, "resume": False,
             "confirm": True}
+
+    def test_a_flush_reason_of_exactly_the_cap_goes_through(self):
+        self.assertEqual(self.post("/flush", dict(self.BODY, reason="x" * dc.MAX_REASON_CHARS)).status_code, 200)
 
     def test_a_flush_calls_the_driver_with_upper_cased_initials(self):
         self.fake.answers["flush"] = {"flushed": True, "requeued_as": 10, "reclaimed_bytes": 5, "rows_restored": 4,
@@ -207,11 +217,11 @@ class Flush(RouteCase):
             ("no reason", {k: v for k, v in self.BODY.items() if k != "reason"}, "reason is required."),
             ("blank reason", dict(self.BODY, reason="   "), "reason is required."),
             ("reason number", dict(self.BODY, reason=5), "reason must be text."),
-            ("long reason", dict(self.BODY, reason="x" * 2001), "reason is longer than 2000 characters."),
-            ("no turn", {k: v for k, v in self.BODY.items() if k != "turn_id"}, "turn must be a whole number of 1 or more."),
-            ("turn zero", dict(self.BODY, turn_id=0), "turn must be a whole number of 1 or more."),
-            ("turn bool", dict(self.BODY, turn_id=True), "turn must be a whole number of 1 or more."),
-            ("turn float", dict(self.BODY, turn_id=6.5), "turn must be a whole number of 1 or more."),
+            ("long reason", dict(self.BODY, reason="x" * (dc.MAX_REASON_CHARS + 1)), f"reason is longer than {dc.MAX_REASON_CHARS} characters."),
+            ("no turn", {k: v for k, v in self.BODY.items() if k != "turn_id"}, "Turn must be a whole number from 1 to 999999."),
+            ("turn zero", dict(self.BODY, turn_id=0), "Turn must be a whole number from 1 to 999999."),
+            ("turn bool", dict(self.BODY, turn_id=True), "Turn must be a whole number from 1 to 999999."),
+            ("turn float", dict(self.BODY, turn_id=6.5), "Turn must be a whole number from 1 to 999999."),
             ("requeue text", dict(self.BODY, requeue="yes"), "requeue must be true or false."),
             ("resume number", dict(self.BODY, resume=1), "resume must be true or false."),
         ]
@@ -305,11 +315,17 @@ class MoveAndShelf(RouteCase):
             ("folder number", dict(self.SHELF, shelf_root=5)),
             ("folder too long", dict(self.SHELF, shelf_root="/x" * 600)),
             ("no reason", dict(self.SHELF, reason="")),
+            ("reason over the driver cap", dict(self.SHELF, reason="x" * (dc.MAX_REASON_CHARS + 1))),
         ]
         for name, body in cases:
             with self.subTest(name):
                 self.assertEqual(self.post("/shelf", body).status_code, 400)
         self.assertEqual(self.fake.calls, [])
+
+    def test_a_shelf_reason_of_exactly_the_cap_goes_through(self):
+        reason = "x" * dc.MAX_REASON_CHARS
+        self.assertEqual(dc.MAX_REASON_CHARS, 300)
+        self.assertEqual(self.post("/shelf", dict(self.SHELF, reason=reason)).status_code, 200)
 
     def test_shelf_relays_the_driver_409(self):
         sentence = "a deposit is in progress, so the Shelf cannot change now"

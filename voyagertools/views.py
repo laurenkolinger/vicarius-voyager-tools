@@ -66,7 +66,7 @@ URL_PREFIX = "/voyager-tools"
 MODULE_SLUG = "voyager_tools"
 DISPLAY_NAME = "Atlas control panel"
 UI_STYLE = "voyager_tools"
-ASSET_VERSION = "20261021c"
+ASSET_VERSION = "20261021e"
 ROOT_SECTION_PREFIX = '<section class="voyager-tools"'
 STATIC_JS = "voyager_tools.js"
 STATIC_SETTINGS_JS = "vt_settings.js"  # the settings and desktop panes (program C spec 5.3)
@@ -1606,7 +1606,7 @@ def _turn_number(value) -> int:
     if isinstance(value, str) and re.fullmatch(TURN_DIGITS, value.strip()):
         value = int(value.strip())
     if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MAX_TURN_NUMBER:
-        raise RequestError("turn must be a whole number of 1 or more.")
+        raise RequestError(f"Turn must be a whole number from 1 to {MAX_TURN_NUMBER}.")
     return value
 
 
@@ -1651,7 +1651,7 @@ def api_v1runs_flush():
     who = _initials(body)
     _confirmed(body)
     turn = _turn_number(body.get("turn_id"))
-    reason = _text(body, "reason", required=True)
+    reason = _text(body, "reason", required=True, max_chars=driver_client.MAX_REASON_CHARS)
     answer = _driver_call("flush", turn, who, reason, _flag(body, "requeue", True), _flag(body, "resume", True))
     current_app.logger.info(LOG_V1RUNS, "flush of turn", turn, who, reason)
     return jsonify(answer)
@@ -1678,7 +1678,7 @@ def api_v1runs_shelf():
     who = _initials(body)
     _confirmed(body)
     shelf = _text(body, "shelf_root", required=True, max_chars=driver_client.MAX_PATH_CHARS)
-    reason = _text(body, "reason", required=True)
+    reason = _text(body, "reason", required=True, max_chars=driver_client.MAX_REASON_CHARS)
     answer = _driver_call("set_batch_shelf", shelf, who, reason)
     current_app.logger.info(LOG_V1RUNS, "Shelf change to", shelf, who, reason)
     return jsonify(answer)
